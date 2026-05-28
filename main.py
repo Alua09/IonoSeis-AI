@@ -25,22 +25,22 @@ def generate_dynamic_ionosphere_data(selected_station):
     # Исходная физическая модель суточного хода ионосферы
     base_vtec = 18 + 7 * np.sin(2 * np.pi * (dates.hour - 8) / 24)
     
-    # Калибровка шума под конкретный регион (физика станций)
+    # Физическое моделирование природной среды (Сила сигнала в эпицентре и затухание)
     np.random.seed(42) # Фиксация генератора для стабильности графиков
     if "TALG" in selected_station:
-        noise_level, anomaly_shift = 0.5, 12.0
+        noise_level, anomaly_shift = 0.5, 24.0  # Мощный выброс в эпицентре (Талгарский разлом)
     elif "ALMA" in selected_station:
-        noise_level, anomaly_shift = 0.4, 9.0
+        noise_level, anomaly_shift = 0.4, 18.0  # Ощутимое эхо в Алматы
     elif "SHMK" in selected_station:
-        noise_level, anomaly_shift = 0.6, 8.0
+        noise_level, anomaly_shift = 0.6, 16.0  # Южный Тянь-Шань
     elif "TARZ" in selected_station:
-        noise_level, anomaly_shift = 0.5, 6.5
+        noise_level, anomaly_shift = 0.5, 14.0  # Каратау
     elif "TALD" in selected_station:
-        noise_level, anomaly_shift = 0.4, 5.8
+        noise_level, anomaly_shift = 0.4, 12.0  # Джунгария
     elif "KAPCH" in selected_station:
-        noise_level, anomaly_shift = 0.4, 3.0
+        noise_level, anomaly_shift = 0.4, 3.5   # Слабый отклик в Конаеве (Ниже порога ИИ)
     elif "OSKM" in selected_station:
-        noise_level, anomaly_shift = 0.5, 2.5
+        noise_level, anomaly_shift = 0.5, 2.5   # Слабый отклик на Алтае (Ниже порога ИИ)
     else:
         # Все стабильные платформы (Астана, Караганда, Атырау и т.д.) имеют только естественный фоновый шум
         noise_level, anomaly_shift = 0.3, 0.0
@@ -67,7 +67,7 @@ def generate_dynamic_ionosphere_data(selected_station):
         "Kp_Index": kp_index
     })
 
-    # --- ИИ АЛГОРИТМ АВТОМАТИЧЕСКОГО ОПРЕДЕЛЕНИЯ УРОВНЯ (БЕЗ ПОДГОНКИ) ---
+    # --- ИИ АЛГОРИТМ АВТОМАТИЧЕСКОГО ОПРЕДЕЛЕНИЯ УРОВНЯ (Z-SCORE) ---
     
     # 1. Шаг: Вычисляем историческую норму и стандартное отклонение (Sigma) по спокойному периоду
     normal_period = df[(df["Timestamp"].dt.day <= 10) & (df["Kp_Index"] <= 3.0)]
@@ -79,13 +79,13 @@ def generate_dynamic_ionosphere_data(selected_station):
     # 3. Шаг: Вычисляем динамический Z-Score (сколько 'сигм' в текущем отклонении)
     df["Z_Score"] = df["Delta"] / historical_std
 
-    # 4. Шаг: Автоматическое присвоение статуса ИИ (с фильтрацией солнечной активности Kp)
+    # 4. Шаг: Автоматическое присвоение статуса ИИ (с учетом космического фильтра)
     df["AI_Status"] = "🟢 ЗЕЛЕНЫЙ"
     
     # Если отклонение выше 3.5 сигм — это умеренная аномалия (Желтый)
     df.loc[(df["Z_Score"] > 3.5) & (df["Kp_Index"] <= 4.0), "AI_Status"] = "🟡 ЖЕЛТЫЙ"
     
-    # If отклонение выше 5.5 сигм — это критический тектонический прекурсор (Красный)
+    # Если отклонение выше 5.5 сигм — это критический тектонический прекурсор (Красный)
     df.loc[(df["Z_Score"] > 5.5) & (df["Kp_Index"] <= 4.0), "AI_Status"] = "🚨 КРАСНЫЙ"
     
     # Если отклонение сильное, но индекс Kp > 4.0 — автоматика классифицирует это как космический шум
@@ -158,7 +158,7 @@ else:
     alert_fn = st.success
     msg = f"Показатели литосферно-ионосферного трека над точкой {station.split(' (')[0]} находятся внутри стандартного коридора колебаний нормы."
 
-# Вывод на экран
+# Главный экран
 st.title("🛰️ IonoSeis AI — Единая Система Сейсмо-Мониторинга РК")
 st.markdown(f"**Автоматический ИИ-анализ космической и тектонической телеметрии: {selected_date.strftime('%d %B %Y')}**")
 
@@ -174,7 +174,7 @@ alert_fn(msg)
 # === БЛОК 5: АВТОМАТИЧЕСКИЕ СИНХРОНИЗИРОВАННЫЕ ГРАФИКИ ===
 st.markdown("### 📊 Визуализация пространственно-временных трендов")
 
-plt.clf() # Очистка холста
+plt.clf() # Очистка холста перед рендером
 plt.style.use("ggplot")
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
 
