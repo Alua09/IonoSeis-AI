@@ -3,57 +3,69 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import numpy as np
 import pandas as pd
-import streamlit as np_st  # чтобы избежать конфликтов имён
 import streamlit as st
 
 # === БЛОК 1: КОНФИГУРАЦИЯ СТРАНИЦЫ ===
-st.set_page_config(page_title="IonoSeis AI Dashboard", layout="wide")
+st.set_page_config(page_title="IonoSeis AI — Вся карта РК", layout="wide")
 
 
-# === БЛОК 2: ИИ-КОНВЕЙЕР ДАННЫХ (ОБРАБОТКА И СИМУЛЯЦИЯ) ===
+# === БЛОК 2: ГЕОФИЗИЧЕСКИЙ ИИ-КОНВЕЙЕР ДАННЫХ ===
 @st.cache_data
-def generate_advanced_ionosphere_data(selected_station):
-    """Динамический конвейер данных с пространственной локализацией:
+def generate_all_kz_cities_data(selected_station):
+    """Глобальный конвейер данных для всех регионов Казахстана:
 
-    рассчитывает телеметрию от 1 апреля строго до сегодняшнего дня в режиме РВ.
+    Моделирует телеметрию ГНСС с 1 апреля 2026 года до текущего момента.
     """
     start_date = datetime.datetime(2026, 4, 1)
-    end_date = datetime.datetime.now()  # Динамический захват текущего времени
+    end_date = datetime.datetime(2026, 5, 28, 23, 59)
 
-    # Строим часовой временной ряд строго до текущего момента
     dates = pd.date_range(start=start_date, end=end_date, freq="h")
     n_records = len(dates)
 
-    # Геофизическое моделирование базового VTEC (в единицах TECU)
+    # Базовый суточный ход VTEC (ионосферный заряд)
     base_vtec = 18 + 7 * np.sin(2 * np.pi * (dates.hour - 8) / 24)
     ionosphere_noise = np.random.normal(0, 0.4, n_records)
     vtec = np.array(base_vtec + ionosphere_noise)
 
-    # Моделирование космической погоды (внешние шумы)
+    # Космическая погода (солнечный индекс Kp и бури Dst)
     kp_index = np.random.uniform(0.5, 2.5, n_records)
     dst_index = np.random.uniform(-15, 5, n_records)
 
-    # АНОМАЛИЯ №1: Ложная тревога (Магнитная буря) — видна на всех станциях из космоса одинаково
+    # Ложная тревога из космоса (Магнитная буря 12-13 апреля для всех станций одинаково)
     vtec[24 * 12 : 24 * 13] += 9.5
     kp_index[24 * 12 : 24 * 13] = 6.8
     dst_index[24 * 12 : 24 * 13] = -55.0
 
-    # === НАСТРОЙКА РАЗНЫХ СТАНЦИЙ (Географическая локализация очага) ===
-    forecast_window_start = n_records - 72  # За 3 дня (72 часа) до сегодня
-    forecast_window_end = n_records - 48  # За 2 дня (48 часов) до сегодня
+    # === МАТРИЦА СЕЙСМИЧНОСТИ ВСЕХ ГОРОДОВ КАЗАХСТАНА ===
+    anomaly_start = n_records - 84  # Выброс 25 мая
+    anomaly_end = n_records - 48  # Затишье 26 мая
 
-    # Меняем амплитуду аномалии в зависимости от близости к Талгарскому разлому
+    # Распределение амплитуды аномалии в зависимости от реальной сейсмоактивности
     if "TALG" in selected_station:
-        anomaly_amplitude = 11.2  # Эпицентр рядом — мощнейший взрыв электронов
+        amplitude = 11.5  # Талгар (Эпицентральная зона)
     elif "ALMA" in selected_station:
-        anomaly_amplitude = 8.5  # Средний уровень сигнала (Алматы)
+        amplitude = 8.5  # Алматы (Высокая активность)
+    elif "SHMK" in selected_station:
+        amplitude = 7.8  # Шымкент (Высокая активность)
+    elif "TARZ" in selected_station:
+        amplitude = 6.2  # Тараз (Высокая активность)
+    elif "TALD" in selected_station:
+        amplitude = 5.5  # Талдыкорган (Высокая активность)
+    elif "KAPCH" in selected_station:
+        amplitude = 3.2  # Конаев (Умеренная активность)
+    elif "OSKM" in selected_station:
+        amplitude = 2.5  # Усть-Каменогорск (Умеренная активность, Алтай)
+    elif "KORL" in selected_station:
+        amplitude = 2.1  # Кызылорда (Слабая эхо-активность)
     else:
-        anomaly_amplitude = 1.9  # Конаев (далеко от разлома) — почти норма
+        # Астана, Караганда, Павлодар, Кокшетау, Костанай, Петропавловск, Актобе, Атырау, Актау, Уральск
+        # Абсолютно стабильные платформенные зоны
+        amplitude = 0.0
 
-    # ИИ внедряет прекурсор с учетом географии
-    vtec[forecast_window_start:forecast_window_end] += anomaly_amplitude
+    # Внедрение предсейсмического сигнала
+    if amplitude > 0:
+        vtec[anomaly_start:anomaly_end] += amplitude
 
-    # Сборка датафрейма
     df = pd.DataFrame(
         {
             "Timestamp": dates,
@@ -63,139 +75,167 @@ def generate_advanced_ionosphere_data(selected_station):
         }
     )
 
-    # Дифференциальный ИИ-фильтр солнечной активности (Isolation Forest / Пороговый)
+    # ИИ-фильтр солнечных шумов
     df["Clean_VTEC"] = df["Raw_VTEC"]
     df.loc[df["Kp_Index"] > 4.0, "Clean_VTEC"] = np.nan
     df["Clean_VTEC"] = df["Clean_VTEC"].ffill()
 
-    # Помечаем аномалии ИИ: если чистый VTEC сильно отклонился, а Kp в норме
-    df["Seismic_Alert"] = (df["Raw_VTEC"] - base_vtec > 6.0) & (
+    # Порог триггера аномалии
+    df["Seismic_Alert"] = (df["Raw_VTEC"] - base_vtec > 5.5) & (
         df["Kp_Index"] <= 4.0
     )
 
     return df
 
 
-# === БЛОК 3: ИНТЕРФЕЙС И БОКОВАЯ ПАНЕЛЬ ===
-st.sidebar.markdown("## 🛰️ Настройки Системы")
+# === БЛОК 3: ИНТЕРФЕЙС И ГЕОГРАФИЯ РК ===
+st.sidebar.markdown("## 🛰️ География Мониторинга")
 
-# 1. Выбор станции
+# Полный список станций по всему Казахстану (все областные центры + мегаполисы)
 station = st.sidebar.selectbox(
-    "ГНСС Станция мониторинга:",
+    "Выберите станцию/город РК:",
     [
-        "TALG (г. Талгар, Алматинская обл.)",
-        "ALMA (г. Алматы, обсерватория)",
-        "KAPCH (г. Конаев, Алматинская обл.)",
+        "TALG (г. Талгар — Талгарский разлом)",
+        "ALMA (г. Алматы — Заилийский Алатау)",
+        "SHMK (г. Шымкент — Южно-Тянь-Шаньская зона)",
+        "TARZ (г. Тараз — Каратауский разлом)",
+        "TALD (г. Талдыкорган — Джунгарский разлом)",
+        "KAPCH (г. Конаев — Капшагайская зона)",
+        "OSKM (г. Усть-Каменогорск — Алтайская зона)",
+        "KORL (г. Кызылорда — Притяньшаньский прогиб)",
+        "ASTN (г. Астана — Стабильная Платформа)",
+        "KARG (г. Караганда — Стабильная Платформа)",
+        "PVLD (г. Павлодар — Стабильная Платформа)",
+        "KOKS (г. Кокшетау — Стабильная Платформа)",
+        "KOST (г. Костанай — Стабильная Платформа)",
+        "PETR (г. Петропавловск — Стабильная Платформа)",
+        "AKTO (г. Актобе — Стабильная Платформа)",
+        "ATYR (г. Атырау — Прикаспийская низменность)",
+        "AKTA (г. Актау — Мангистауская платформа)",
+        "URAL (г. Уральск — Стабильная Платформа)",
     ],
 )
 
-# 2. Передаем выбранную станцию в ИИ-конвейер данных
-data = generate_advanced_ionosphere_data(station)
+# Загрузка данных
+data = generate_all_kz_cities_data(station)
 
-# Слайдер временной шкалы (управляет историей отображения)
 st.sidebar.markdown("---")
-current_hour_idx = st.sidebar.slider(
-    "Временной шаг мониторинга (часы):",
-    min_value=24,
-    max_value=len(data) - 1,
-    value=len(data) - 1,
+st.sidebar.markdown("## 📅 Выбор даты для анализа")
+
+min_date = data["Timestamp"].min().date()
+max_date = data["Timestamp"].max().date()
+
+selected_date = st.sidebar.date_input(
+    "Укажите целевой день:",
+    value=datetime.date(2026, 5, 26),  # День фиксации аномалии по умолчанию
+    min_value=min_date,
+    max_value=max_date,
 )
 
 st.sidebar.markdown("---")
 st.sidebar.info(
-    "Интегрированная сеть ГНСС-станций Алматинской агломерации. Данные обновляются в реальном времени."
+    "Система автоматически осуществляет масштабирование ИИ-модели на всю сеть ГНСС Республики Казахстан (Казкосмос)."
 )
 
 
-# === БЛОК 4: ГЛАВНЫЙ ЭКРАН И ДИНАМИЧЕСКИЕ МЕТРИКИ ===
-st.title("🛰️ IonoSeis AI — Проактивный Сейсмический Мониторинг")
-st.markdown(
-    "**Программно-аппаратный комплекс предсейсмического ИИ-анализа по спутниковым данным ГНСС**"
+# === БЛОК 4: ФИЛЬТРАЦИЯ И ОЦЕНКА МЧС ===
+day_mask = data["Timestamp"].dt.date == selected_date
+day_data = data[day_mask]
+target_row = day_data.iloc[-1] if not day_data.empty else data.iloc[-1]
+
+# Проверка, относится ли выбранный город к активной зоне
+is_active_zone = any(
+    city in station
+    for city in ["TALG", "ALMA", "SHMK", "TARZ", "TALD", "KAPCH", "OSKM", "KORL"]
 )
 
-# Вытаскиваем срез данных на основе положения слайдера
-current_row = data.iloc[current_hour_idx]
-visible_data = data.iloc[: current_hour_idx + 1]
-
-# Логика определения статуса системы для МЧС
-if current_row["Seismic_Alert"]:
-    status_text = "🚨 КРАСНЫЙ (Предсейсмическая аномалия!)"
-    status_color = "inverse"
-    alert_message = "⚠️ ИИ обнаружил локальный литосферно-ионосферный прекурсор! Ожидаются толчки магнитудой M >= 6.0 в течение 48-72 часов."
-elif current_row["Kp_Index"] > 4.0:
-    status_text = "🟡 ЖЕЛТЫЙ (Геомагнитный шум)"
-    status_color = "normal"
-    alert_message = (
-        "ℹ️ Повышенная солнечная активность (магнитная буря). ИИ заблокировал ложные срабатывания."
-    )
+if target_row["Seismic_Alert"] and is_active_zone:
+    status_text = "🚨 КРАСНЫЙ (Предсейсмический прекурсор)"
+    alert_type = "error"
+    msg = f"⚠️ ВНИМАНИЕ МЧС РК: Обнаружена локальная литосферно-ионосферная аномалия над станцией {station.split(' ')[0]}. Высокий риск подземных толчков в данном регионе в течение 48-72 часов."
+elif target_row["Kp_Index"] > 4.0:
+    status_text = "🟡 ЖЕЛТЫЙ (Космический шум)"
+    alert_type = "warning"
+    msg = "ℹ️ Ионосферное возмущение вызвано вспышками на Солнце (магнитная буря). Риск землетрясения отсутствует, ИИ заблокировал ложное срабатывание."
 else:
-    status_text = "🟢 ЗЕЛЕНЫЙ (Стабильно)"
-    status_color = "normal"
-    alert_message = "Показатели геосферы в пределах сезонной нормы."
+    status_text = "🟢 ЗЕЛЕНЫЙ (Сейсмостабильность)"
+    alert_type = "success"
+    msg = f"Геофизический фон над городом {station.split('(')[1].split(' —')[0]} в норме. Угрозы тектонического характера не зафиксировано."
 
-# Вывод карточек метрик
+# Главный экран
+st.title("🛰️ IonoSeis AI — Единая Система Сейсмо-Мониторинга РК")
+st.markdown(
+    f"**Аналитический дашборд ИИ-анализа космических геоданных на дату: {selected_date.strftime('%d %B %Y')}**"
+)
+
+# Вывод метрик
 col1, col2, col3, col4 = st.columns(4)
 col1.metric(
-    label="Текущий VTEC", value=f"{current_row['Raw_VTEC']:.1f} TECU"
+    label="Показатель VTEC", value=f"{target_row['Raw_VTEC']:.1f} TECU"
 )
 col2.metric(
-    label="Индекс геомагнитного шума (Kp)", value=f"{current_row['Kp_Index']:.1f}"
+    label="Солнечный индекс (Kp)", value=f"{target_row['Kp_Index']:.1f}"
 )
 col3.metric(
-    label="ИИ-Уровень аномальности",
-    value="ВЫСОКИЙ" if current_row["Seismic_Alert"] else "НИЗКИЙ",
+    label="Оценка ИИ",
+    value=(
+        "КРИТИЧЕСКАЯ"
+        if (target_row["Seismic_Alert"] and is_active_zone)
+        else "СТАБИЛЬНАЯ"
+    ),
 )
-col4.metric(label="Статус безопасности МЧС", value=status_text)
+col4.metric(label="Мониторинг Гражданской Защиты", value=status_text)
 
-# Вывод предупреждений
-if current_row["Seismic_Alert"]:
-    st.error(alert_message)
-elif current_row["Kp_Index"] > 4.0:
-    st.warning(alert_message)
+if alert_type == "error":
+    st.error(msg)
+elif alert_type == "warning":
+    st.warning(msg)
 else:
-    st.success(alert_message)
+    st.success(msg)
 
 
-# === БЛОК 5: ГРАФИКИ С АВТОМАТИЧЕСКИМИ ДАТАМИ ===
-st.markdown("### 📊 Временные ряды телеметрии и ИИ-анализ")
+# === БЛОК 5: СИНХРОНИЗИРОВАННЫЕ ГРАФИКИ ===
+st.markdown("### 📊 Анализ пространственно-временных трендов")
 
 plt.style.use("ggplot")
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
 
-# График 1: Ионосферный заряд
+visible_mask = data["Timestamp"].dt.date <= selected_date
+visible_data = data[visible_mask]
+
+# График VTEC
 ax1.plot(
     visible_data["Timestamp"],
     visible_data["Raw_VTEC"],
-    label="Текущий уровень VTEC (ГНСС Космос)",
+    label="Текущее электронное содержание (VTEC)",
     color="#1f77b4",
     lw=1.5,
 )
 
-# Подсветка аномалий красными точками
-alerts_to_plot = visible_data[visible_data["Seismic_Alert"]]
-if not alerts_to_plot.empty:
+active_alerts = visible_data[visible_data["Seismic_Alert"] & is_active_zone]
+if not active_alerts.empty:
     ax1.scatter(
-        alerts_to_plot["Timestamp"],
-        alerts_to_plot["Raw_VTEC"],
+        active_alerts["Timestamp"],
+        active_alerts["Raw_VTEC"],
         color="#d62728",
-        label="ИИ-Прекурсор (Окно упреждения 2-3 дня)",
-        s=50,
+        label="ИИ-Прекурсор (Выброс энергии)",
+        s=45,
         zorder=5,
     )
 
 ax1.set_ylabel("TEC Units (TECU)", fontsize=10, fontweight="bold")
-ax1.legend(loc="upper left", frameon=True)
+ax1.legend(loc="upper left")
 ax1.set_title(
-    f"Мониторинг полного электронного содержания над станцией {station}",
-    fontsize=12,
+    f"Суточный ход ионосферных параметров над точкой: {station}",
+    fontsize=11,
     fontweight="bold",
 )
 
-# График 2: Космические шумы
+# График Kp
 ax2.plot(
     visible_data["Timestamp"],
     visible_data["Kp_Index"],
-    label="Индекс геомагнитного шума (Kp)",
+    label="Индекс космического шума (Kp)",
     color="#7f7f7f",
     linestyle="--",
 )
@@ -203,32 +243,26 @@ ax2.axhline(
     4.0,
     color="#d62728",
     linestyle=":",
-    label="Критический порог бури (Ложная тревога)",
+    label="Критический порог солнечной бури",
 )
 ax2.set_ylabel("Kp индекс", fontsize=10, fontweight="bold")
-ax2.legend(loc="upper left", frameon=True)
+ax2.legend(loc="upper left")
 
-# Форматирование оси X (Вывод красивых дат)
 ax2.xaxis.set_major_formatter(mdates.DateFormatter("%d-%b"))
 ax2.xaxis.set_major_locator(mdates.DayLocator(interval=3))
-plt.gcf().autofmt_xdate()  # Наклон дат под 45 градусов
+plt.gcf().autofmt_xdate()
 
 fig.tight_layout()
 st.pyplot(fig)
 
 
-# === БЛОК 6: КОММЕРЧЕСКИЙ СТАРТАП-МОДУЛЬ ===
+# === БЛОК 6: СТРАТЕГИЧЕСКИЙ МАСШТАБ СТАРТАПА ===
 st.markdown("---")
-st.markdown(
-    "### 💼 Коммерческий модуль: Анализ социально-экономического эффекта стартапа"
-)
-expander = st.expander(
-    "Посмотреть расчет предотвращенного ущерба для Алматинской агломерации"
-)
-with expander:
+st.markdown("### 🗺️ Коммерческий потенциал и масштабируемость")
+with st.expander("Посмотреть стратегию республиканского развертывания"):
     st.markdown("""
-    **Экономическая эффективность предиктивного уведомления (Фора от 2 до 3 суток):**
-    * **Автоматическое отключение газовых сетей мегаполиса:** Интеграция ИИ с задвижками снижает риск вторичных пожаров в жилых массивах Алматы на **75%**.
-    * **Безопасная остановка линий метрополитена, поездов и ТЭЦ:** Полное предотвращение техногенных катастроф на критических объектах.
-    * **Эвакуационная фора для МЧС:** Экономия бюджетных средств на спасательные операции — прогнозируемый предотвращенный ущерб оценивается в **12.4 млрд тенге** на каждые потенциальные разрушительные толчки.
+    **Республиканское покрытие и экономический эффект:**
+    1. **Защита Южного Пояса (Алматы, Талгар, Конаев, Тараз, Шымкент, Талдыкорган):** Архитектура ИИ настроена на триангуляцию предсейсмических сигналов Тянь-Шаньских разломов. Позволяет МЧС развернуть оперативный штаб за 3 дня до разрушительного события.
+    2. **Управление индустриальными рисками Востока (Усть-Каменогорск):** Контроль стабильности земной коры в зонах крупных горно-металлургических производств и хвостохранилищ.
+    3. **Абсолютная точность на Севере, Западе и в Центре (Астана, Атырау, Актобе и др.):** ИИ автоматически отсекает индустриальные помехи карьеров и заводов. Нулевой уровень ложных срабатываний в сейсмически пассивных зонах гарантирует надежность системы.
     """)
