@@ -44,17 +44,17 @@ def load_pure_satellite_data(selected_station):
         df_kp["Timestamp"] = pd.to_datetime(df_kp["time_tag"])
         df_kp["Kp_Index"] = df_kp["kp_index"].astype(float)
         
-        # Фильтруем данные только за последние 7 дней и ресэмплим по часам для графиков
-        df_kp = df_kp[df_kp["Timestamp"] >= (datetime.datetime.utcnow() - datetime.timedelta(days=7))]
-        df = df_kp.resample("h", on="Timestamp").mean().reset_index()
+        # Фильтруем данные только за последние 7 дней
+        cutoff_date = datetime.datetime.utcnow() - datetime.timedelta(days=7)
+        df_kp = df_kp[df_kp["Timestamp"] >= cutoff_date]
+        
+        # ИСПРАВЛЕНИЕ БАГА: явно указываем усреднять ТОЛЬКО числовые колонки (numeric_only=True)
+        df = df_kp.resample("h", on="Timestamp").mean(numeric_only=True).reset_index()
     except Exception as e:
         st.error(f"Ошибка прямого запроса к серверам NOAA: {e}")
         return None
 
     # 2. Интеграция с NASA Earthdata и расчет физического профиля VTEC
-    # Внутренний заголовок авторизации по вашему JWT-токену для безопасных запросов к CDDIS NASA
-    nasa_headers = {"Authorization": f"Bearer {NASA_API_TOKEN}"}
-    
     times = df["Timestamp"]
     
     # Геофизический расчет: электронная концентрация жестко зависит от широты места (lat) и угла Солнца
@@ -97,8 +97,8 @@ station = st.sidebar.selectbox(
     [
         "ALMA (г. Алматы — Заилийский Алатау)",
         "TALG (г. Талгар — Талгарский разлом)",
-        "ASTN (г. Астана — Стабильная Платформа)",
-        "KARG (г. Караганда — Стабильная Платформа)",
+        "ASTN (г. Астана — Stable Platform)",
+        "KARG (г. Караганда — Stable Platform)",
     ],
 )
 
