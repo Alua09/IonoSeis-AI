@@ -44,7 +44,7 @@ with col2:
     
     # --- НОЧНОЙ ФИЛЬТР ---
     current_hour = datetime.datetime.now().hour
-    is_night = current_hour >= 22 or current_hour <= 6
+    is_night = current_hour >= 21 or current_hour <= 6 
     threshold = 18 if is_night else 23
     
     st.write(f"Текущее время: **{datetime.datetime.now().strftime('%H:%M')}**")
