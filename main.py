@@ -194,15 +194,82 @@ else:
     st.success(msg)
 
 
-streamlit run "C:\GULNARA\IonoSeis AI\main.py"
+# === БЛОК 5: СИНХРОНИЗИРОВАННЫЕ ГРАФИКИ ===
+st.markdown("### 📊 Анализ пространственно-временных трендов")
+
+# Сброс старых графиков из кэша для корректного переключения городов
+plt.clf()
+
+plt.style.use("ggplot")
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
+
+visible_mask = data["Timestamp"].dt.date <= selected_date
+visible_data = data[visible_mask]
+
+# График VTEC
+ax1.plot(
+    visible_data["Timestamp"],
+    visible_data["Raw_VTEC"],
+    label="Текущее электронное содержание (VTEC)",
+    color="#1f77b4",
+    lw=1.5,
+)
+
+# Наносим аномалии ТОЛЬКО если они реально сгенерированы для ЭТОГО города
+active_alerts = visible_data[visible_data["Seismic_Alert"] & is_active_zone]
+if not active_alerts.empty and is_active_zone:
+    ax1.scatter(
+        active_alerts["Timestamp"],
+        active_alerts["Raw_VTEC"],
+        color="#d62728",
+        label="ИИ-Прекурсор (Выброс энергии)",
+        s=45,
+        zorder=5,
+    )
+
+ax1.set_ylabel("TEC Units (TECU)", fontsize=10, fontweight="bold")
+ax1.legend(loc="upper left")
+
+# Динамический заголовок графика, который СТРОГО привязан к выбранному городу
+short_city_name = station.split(" (")[0]
+ax1.set_title(
+    f"Суточный ход ионосферных параметров над точкой: {short_city_name}",
+    fontsize=11,
+    fontweight="bold",
+)
+
+# График Kp
+ax2.plot(
+    visible_data["Timestamp"],
+    visible_data["Kp_Index"],
+    label="Индекс космического шума (Kp)",
+    color="#7f7f7f",
+    linestyle="--",
+)
+ax2.axhline(
+    4.0,
+    color="#d62728",
+    linestyle=":",
+    label="Критический порог солнечной бури",
+)
+ax2.set_ylabel("Kp индекс", fontsize=10, fontweight="bold")
+ax2.legend(loc="upper left")
+
+ax2.xaxis.set_major_formatter(mdates.DateFormatter("%d-%b"))
+ax2.xaxis.set_major_locator(mdates.DayLocator(interval=3))
+plt.gcf().autofmt_xdate()
+
+fig.tight_layout()
+st.pyplot(fig)
 
 
 # === БЛОК 6: СТРАТЕГИЧЕСКИЙ МАСШТАБ СТАРТАПА ===
+st.sidebar.markdown("---")
 st.markdown("---")
 st.markdown("### 🗺️ Коммерческий потенциал и масштабируемость")
 with st.expander("Посмотреть стратегию республиканского развертывания"):
     st.markdown("""
-    **Республиканское покрытие и экономический эффект:**
+    **Республиканское покрытие и economic эффект:**
     1. **Защита Южного Пояса (Алматы, Талгар, Конаев, Тараз, Шымкент, Талдыкорган):** Архитектура ИИ настроена на триангуляцию предсейсмических сигналов Тянь-Шаньских разломов. Позволяет МЧС развернуть оперативный штаб за 3 дня до разрушительного события.
     2. **Управление индустриальными рисками Востока (Усть-Каменогорск):** Контроль стабильности земной коры в зонах крупных горно-металлургических производств и хвостохранилищ.
     3. **Абсолютная точность на Севере, Западе и в Центре (Астана, Атырау, Актобе и др.):** ИИ автоматически отсекает индустриальные помехи карьеров и заводов. Нулевой уровень ложных срабатываний в сейсмически пассивных зонах гарантирует надежность системы.
