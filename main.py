@@ -194,66 +194,7 @@ else:
     st.success(msg)
 
 
-# === БЛОК 5: СИНХРОНИЗИРОВАННЫЕ ГРАФИКИ ===
-st.markdown("### 📊 Анализ пространственно-временных трендов")
-
-plt.style.use("ggplot")
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
-
-visible_mask = data["Timestamp"].dt.date <= selected_date
-visible_data = data[visible_mask]
-
-# График VTEC
-ax1.plot(
-    visible_data["Timestamp"],
-    visible_data["Raw_VTEC"],
-    label="Текущее электронное содержание (VTEC)",
-    color="#1f77b4",
-    lw=1.5,
-)
-
-active_alerts = visible_data[visible_data["Seismic_Alert"] & is_active_zone]
-if not active_alerts.empty:
-    ax1.scatter(
-        active_alerts["Timestamp"],
-        active_alerts["Raw_VTEC"],
-        color="#d62728",
-        label="ИИ-Прекурсор (Выброс энергии)",
-        s=45,
-        zorder=5,
-    )
-
-ax1.set_ylabel("TEC Units (TECU)", fontsize=10, fontweight="bold")
-ax1.legend(loc="upper left")
-ax1.set_title(
-    f"Суточный ход ионосферных параметров над точкой: {station}",
-    fontsize=11,
-    fontweight="bold",
-)
-
-# График Kp
-ax2.plot(
-    visible_data["Timestamp"],
-    visible_data["Kp_Index"],
-    label="Индекс космического шума (Kp)",
-    color="#7f7f7f",
-    linestyle="--",
-)
-ax2.axhline(
-    4.0,
-    color="#d62728",
-    linestyle=":",
-    label="Критический порог солнечной бури",
-)
-ax2.set_ylabel("Kp индекс", fontsize=10, fontweight="bold")
-ax2.legend(loc="upper left")
-
-ax2.xaxis.set_major_formatter(mdates.DateFormatter("%d-%b"))
-ax2.xaxis.set_major_locator(mdates.DayLocator(interval=3))
-plt.gcf().autofmt_xdate()
-
-fig.tight_layout()
-st.pyplot(fig)
+streamlit run "C:\GULNARA\IonoSeis AI\main.py"
 
 
 # === БЛОК 6: СТРАТЕГИЧЕСКИЙ МАСШТАБ СТАРТАПА ===
