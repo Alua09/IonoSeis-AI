@@ -18,15 +18,9 @@ def get_and_unpack_data():
         
     short_name = 'GNSS_IGS_AC_ion_VTEC_comp'
     
-    # АВТОРИЗАЦИЯ:
-    # 1. Если есть секреты в облаке (Secrets на сайте Streamlit), используем их
-    if "EARTHDATA_USERNAME" in st.secrets:
-        os.environ["EARTHDATA_USERNAME"] = st.secrets["EARTHDATA_USERNAME"]
-        os.environ["EARTHDATA_PASSWORD"] = st.secrets["EARTHDATA_PASSWORD"]
-        earthaccess.login(strategy="environment")
-    else:
-        # 2. Если запускаем локально, используем интерактив
-        earthaccess.login(strategy="interactive")
+    # ИНТЕРАКТИВНЫЙ ВХОД: Самый надежный способ
+    # Он работает везде: и в коде, и в облаке, и на ноутбуке
+    earthaccess.login(strategy="interactive")
         
     results = earthaccess.search_data(short_name=short_name)
     if not results: return None
@@ -41,7 +35,7 @@ def get_and_unpack_data():
     return unzipped_path
 
 if st.button("🚀 Запустить научный анализ"):
-    with st.spinner("Обработка данных..."):
+    with st.spinner("Загрузка и обработка..."):
         try:
             path = get_and_unpack_data()
             if path:
@@ -78,8 +72,8 @@ if st.button("🚀 Запустить научный анализ"):
                     ax.legend()
                     st.pyplot(fig)
                     
-                    if len(anomalies) > 0: st.warning("⚠️ Обнаружены ионосферные аномалии!")
+                    if len(anomalies) > 0: st.warning("⚠️ Обнаружены аномалии!")
                     else: st.success("Ионосфера в норме.")
             else: st.error("Данные не найдены.")
         except Exception as e:
-            st.error(f"Ошибка при обработке: {e}")
+            st.error(f"Ошибка: {e}")
