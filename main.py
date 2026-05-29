@@ -6,7 +6,6 @@ import shutil
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Настройка страницы
 st.set_page_config(page_title="IonoSeis AI", layout="wide")
 st.title("🛰 IonoSeis AI: Анализ ионосферных аномалий")
 
@@ -17,9 +16,6 @@ def get_and_unpack_data():
         os.makedirs(DATA_DIR)
         
     short_name = 'GNSS_IGS_AC_ion_VTEC_comp'
-    
-    # ИНТЕРАКТИВНЫЙ ВХОД: Самый надежный способ
-    # Он работает везде: и в коде, и в облаке, и на ноутбуке
     earthaccess.login(strategy="interactive")
         
     results = earthaccess.search_data(short_name=short_name)
@@ -28,14 +24,17 @@ def get_and_unpack_data():
     files = earthaccess.download(results[-1], DATA_DIR)
     file_path = files[0]
     
-    unzipped_path = file_path.replace('.gz', '')
+    # НАДЕЖНАЯ ЗАМЕНА РАСШИРЕНИЯ
+    base = os.path.splitext(file_path)[0]
+    unzipped_path = base  # Теперь никакой ошибки с replace
+    
     with gzip.open(file_path, 'rb') as f_in:
         with open(unzipped_path, 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
     return unzipped_path
 
 if st.button("🚀 Запустить научный анализ"):
-    with st.spinner("Загрузка и обработка..."):
+    with st.spinner("Обработка..."):
         try:
             path = get_and_unpack_data()
             if path:
@@ -57,11 +56,12 @@ if st.button("🚀 Запустить научный анализ"):
                     moving_avg = np.convolve(data, np.ones(50)/50, mode='same')
                     threshold = np.std(data) * 2
                     
-                    fig, ax = plt.subplots(figsize=(10, 5))
+                    # КОМПАКТНЫЙ РАЗМЕР (7, 4)
+                    fig, ax = plt.subplots(figsize=(7, 4))
                     idx = np.arange(len(data))[-1000:]
                     
                     ax.plot(idx, data[-1000:], color='gray', alpha=0.5, label="VTEC")
-                    ax.plot(idx, moving_avg[-1000:], color='blue', label="Фоновый тренд")
+                    ax.plot(idx, moving_avg[-1000:], color='blue', label="Фон")
                     ax.fill_between(idx, moving_avg[-1000:] - threshold, moving_avg[-1000:] + threshold, color='green', alpha=0.2)
                     
                     anomalies = np.where(np.abs(data - moving_avg) > threshold)[0]
@@ -71,9 +71,6 @@ if st.button("🚀 Запустить научный анализ"):
                     ax.set_title("Мониторинг предвестников")
                     ax.legend()
                     st.pyplot(fig)
-                    
-                    if len(anomalies) > 0: st.warning("⚠️ Обнаружены аномалии!")
-                    else: st.success("Ионосфера в норме.")
             else: st.error("Данные не найдены.")
         except Exception as e:
             st.error(f"Ошибка: {e}")
