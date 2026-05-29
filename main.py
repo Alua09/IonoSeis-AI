@@ -17,7 +17,16 @@ def get_and_unpack_data():
         os.makedirs(DATA_DIR)
         
     short_name = 'GNSS_IGS_AC_ion_VTEC_comp'
-    earthaccess.login(strategy="interactive")
+    
+    # АВТОРИЗАЦИЯ:
+    # 1. Если есть секреты в облаке (Secrets на сайте Streamlit), используем их
+    if "EARTHDATA_USERNAME" in st.secrets:
+        os.environ["EARTHDATA_USERNAME"] = st.secrets["EARTHDATA_USERNAME"]
+        os.environ["EARTHDATA_PASSWORD"] = st.secrets["EARTHDATA_PASSWORD"]
+        earthaccess.login(strategy="environment")
+    else:
+        # 2. Если запускаем локально, используем интерактив
+        earthaccess.login(strategy="interactive")
         
     results = earthaccess.search_data(short_name=short_name)
     if not results: return None
