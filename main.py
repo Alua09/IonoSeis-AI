@@ -18,22 +18,18 @@ if not os.path.exists(DATA_DIR):
 def get_and_unpack_data():
     short_name = 'GNSS_IGS_AC_ion_VTEC_comp'
     
-    # Авторизация: проверяем секреты (для облака) или используем интерактив
-    if "EARTHDATA_USERNAME" in st.secrets:
-        earthaccess.login(
-            username=st.secrets["EARTHDATA_USERNAME"],
-            password=st.secrets["EARTHDATA_PASSWORD"],
-            strategy="password"
-        )
-    else:
-        earthaccess.login(strategy="interactive")
+    # Используем интерактивный вход: при первом запуске в терминале 
+    # нужно будет один раз ввести логин/пароль NASA. Это самый надежный способ.
+    earthaccess.login(strategy="interactive")
         
     results = earthaccess.search_data(short_name=short_name)
     if not results: return None
     
+    # Скачиваем последний доступный файл
     files = earthaccess.download(results[-1], DATA_DIR)
     file_path = files[0]
     
+    # Распаковка
     unzipped_path = file_path.replace('.gz', '')
     with gzip.open(file_path, 'rb') as f_in:
         with open(unzipped_path, 'wb') as f_out:
@@ -53,20 +49,23 @@ if st.button("🚀 Запустить научный анализ"):
                         if "END OF TEC MAP" in line: in_map = False
                         if in_map and not any(c.isalpha() for c in line):
                             for p in line.split():
-                                val = float(p)
-                                if val < 9999: tec_values.append(val / 10.0)
+                                try:
+                                    val = float(p)
+                                    if val < 9999: tec_values.append(val / 10.0)
+                                except: continue
                 
                 if tec_values:
                     data = np.array(tec_values)
-                    # Скользящее среднее для выявления фона
+                    # Вычисляем скользящее среднее (фон)
                     moving_avg = np.convolve(data, np.ones(50)/50, mode='same')
                     threshold = np.std(data) * 2
                     
-                    # Визуализация
+                    # Визуализация (последние 1000 точек для наглядности)
                     fig, ax = plt.subplots(figsize=(8, 4))
                     idx = np.arange(len(data))[-1000:]
+                    
                     ax.plot(idx, data[-1000:], color='gray', alpha=0.5, label="VTEC")
-                    ax.plot(idx, moving_avg[-1000:], color='blue', label="Нормальный фон")
+                    ax.plot(idx, moving_avg[-1000:], color='blue', label="Фоновый тренд")
                     ax.fill_between(idx, moving_avg[-1000:] - threshold, moving_avg[-1000:] + threshold, 
                                     color='green', alpha=0.2)
                     
@@ -81,10 +80,10 @@ if st.button("🚀 Запустить научный анализ"):
                     st.pyplot(fig)
                     
                     if len(anomalies) > 0:
-                        st.warning("⚠️ Обнаружены ионосферные аномалии! Рекомендуется проверка сейсмических данных.")
+                        st.warning("⚠️ Обнаружены ионосферные аномалии!")
                     else:
                         st.success("Ионосфера в спокойном состоянии.")
             else:
                 st.error("Данные не найдены.")
         except Exception as e:
-            st.error(f"Ошибка парсинга: {e}")
+            st.error(f"Ошибка: {e}")
