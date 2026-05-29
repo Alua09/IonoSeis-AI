@@ -1,77 +1,76 @@
 import streamlit as st
-import pandas as pd
+import earthaccess
+import os
+import gzip
+import shutil
+import matplotlib.pyplot as plt
 import numpy as np
-import plotly.express as px
-import datetime
-from datetime import timedelta
 
-# 1. Настройка страницы
-st.set_page_config(page_title="IonoSeis AI", layout="wide")
+st.set_page_config(page_title="IonoSeis AI | Expert", layout="wide")
+st.title("🛰 IonoSeis AI: Анализ ионосферных аномалий")
 
-
-# 2. Модуль получения данных (Архитектура под IONEX/GIM)
-def get_data():
-    """
-    Моделирует работу парсера ионосферных карт (GIM/IONEX).
-    Система спроектирована для интеграции с данными CDDIS/NASA.
-    """
-    data = {
-        "Station": ["ALMA", "ASTN", "SHYM", "TALD"],
-        "VTEC": [18.5, 17.2, 19.8, 16.5],
-        "Kp": [2.0, 2.0, 2.0, 2.0]
-    }
-    return pd.DataFrame(data)
+DATA_DIR = "./data"
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
 
 
-# 3. Интерфейс
-st.title("🛰 IonoSeis AI: Интеллектуальный мониторинг ионосферы")
-st.markdown("Проект системы анализа геофизических данных для обнаружения предвестников сейсмической активности.")
+def get_and_unpack_data():
+    short_name = 'GNSS_IGS_AC_ion_VTEC_comp'
+    earthaccess.login(strategy="interactive")
+    results = earthaccess.search_data(short_name=short_name)
+    if not results: return None
 
-df = get_data()
+    files = earthaccess.download(results[-1], DATA_DIR)
+    file_path = files[0]
 
-# 4. Визуализация и ИИ-анализ
-col1, col2 = st.columns([2, 1])
+    unzipped_path = file_path.replace('.gz', '')
+    with gzip.open(file_path, 'rb') as f_in:
+        with open(unzipped_path, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
+    return unzipped_path
 
-with col1:
-    st.subheader("Мониторинг станций (VTEC)")
-    fig = px.bar(df, x='Station', y='VTEC', color='VTEC',
-                 color_continuous_scale='RdYlGn_r', title="Уровень ионизации VTEC (TECU)")
-    st.plotly_chart(fig, use_container_width=True)
 
-with col2:
-    st.subheader("🤖 Вердикт ИИ-анализатора")
+if st.button("🚀 Запустить научный анализ"):
+    with st.spinner("Извлечение данных и статистическая обработка..."):
+        try:
+            path = get_and_unpack_data()
+            if path:
+                tec_values = []
+                with open(path, 'r') as f:
+                    in_map = False
+                    for line in f:
+                        if "START OF TEC MAP" in line: in_map = True
+                        if "END OF TEC MAP" in line: in_map = False
+                        if in_map and not any(c.isalpha() for c in line):
+                            for p in line.split():
+                                val = float(p)
+                                if val < 9999: tec_values.append(val / 10.0)
 
-    # Расчет времени Алматы (UTC+5)
-    almaty_time = datetime.datetime.utcnow() + timedelta(hours=5)
-    current_hour = almaty_time.hour
-    is_night = current_hour >= 21 or current_hour <= 6
-    threshold = 18 if is_night else 23
+                # Статистический анализ
+                if tec_values:
+                    data = np.array(tec_values[::50])  # Берем выборку
+                    moving_avg = np.convolve(data, np.ones(10) / 10, mode='same')
+                    threshold = np.std(data) * 2  # Порог 2 сигмы
 
-    vtec_mean = df['VTEC'].mean()
-    kp_mean = df['Kp'].mean()
+                    fig, ax = plt.subplots(figsize=(10, 5))
+                    ax.plot(data, color='gray', alpha=0.5, label="Raw VTEC")
+                    ax.plot(moving_avg, color='blue', label="Норма (Trend)")
+                    ax.fill_between(range(len(data)), moving_avg - threshold, moving_avg + threshold,
+                                    color='green', alpha=0.2, label="Зона нормы")
 
-    st.write(f"Время (Алматы): **{almaty_time.strftime('%H:%M')}**")
-    st.write(f"Режим: **{'Ночной' if is_night else 'Дневной'}**")
-    st.write(f"Порог чувствительности: **{threshold} TECU**")
-    st.write(f"Средний VTEC: **{vtec_mean:.1f}** TECU")
-    st.write(f"Kp-индекс: **{kp_mean:.1f}**")
+                    # Поиск аномалий
+                    anomalies = np.where(np.abs(data - moving_avg) > threshold)[0]
+                    ax.scatter(anomalies, data[anomalies], color='red', label="АНОМАЛИЯ!")
 
-    st.markdown("---")
+                    ax.set_title("Мониторинг предвестников землетрясений")
+                    ax.legend()
+                    st.pyplot(fig)
 
-    if vtec_mean > threshold:
-        if kp_mean < 3:
-            st.error("🚨 ВНИМАНИЕ: Аномалия VTEC при низком Kp! Вероятность литосферного воздействия.")
-        else:
-            st.warning("⚠️ ПОВЫШЕННЫЙ ФОН: Возмущение вызвано геомагнитной активностью.")
-    else:
-        st.success("✅ Состояние ионосферы стабильно.")
-
-# 5. Инфо-подвал
-st.markdown("---")
-with st.expander("ℹ️ Техническая справка"):
-    st.write("""
-    Система спроектирована на основе методологии IGS (International GNSS Service). 
-    В качестве источника данных используются глобальные карты ионосферы (GIM), 
-    интерполированные для территории Казахстана. Система осуществляет 
-    автоматический анализ VTEC и Kp-индекса для исключения ложноположительных срабатываний.
-    """)
+                    if len(anomalies) > 0:
+                        st.warning("⚠️ Внимание: Обнаружены ионосферные аномалии!")
+                    else:
+                        st.success("Ситуация в норме, аномалий не обнаружено.")
+            else:
+                st.error("Данные не найдены.")
+        except Exception as e:
+            st.error(f"Ошибка: {e}")
