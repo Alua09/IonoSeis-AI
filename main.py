@@ -7,15 +7,15 @@ import subprocess
 import os
 
 st.set_page_config(page_title="IonoSeis AI", layout="wide")
-st.title("🛰 IonoSeis AI: Анализ данных IONEX")
+st.title("🛰 IonoSeis AI: Анализ данных")
 
 try:
     earthaccess.login()
 except Exception as e:
     st.error(f"Ошибка авторизации: {e}")
 
-if st.button("🚀 Анализировать актуальные данные"):
-    with st.spinner("Загрузка и обработка данных..."):
+if st.button("🚀 Анализировать данные"):
+    with st.spinner("Диагностика файла..."):
         try:
             end_date = datetime.now()
             start_date = end_date - timedelta(days=30)
@@ -27,32 +27,25 @@ if st.button("🚀 Анализировать актуальные данные"
             )
 
             if not results:
-                st.error("Данные за последний месяц не найдены.")
+                st.error("Данные не найдены.")
             else:
                 files = earthaccess.download(results, "data")
                 raw_path = str(files[0])
 
-                # Используем системную утилиту 'gunzip', которая лучше понимает .Z файлы
-                if raw_path.endswith('.Z'):
-                    # Переименовываем файл, чтобы у него было расширение .Z для gunzip
-                    uncompressed_path = raw_path.replace('.Z', '.rnx')
-                    # Вызываем системную команду для распаковки
-                    subprocess.run(['gunzip', '-c', raw_path], stdout=open(uncompressed_path, 'wb'), check=True)
-                    path = uncompressed_path
+                # Читаем первые 500 байт файла, чтобы увидеть, что там внутри
+                with open(raw_path, 'rb') as f:
+                    header_sample = f.read(500)
+
+                st.write("Первые 500 байт файла (для диагностики):")
+                st.code(header_sample[:200])  # Покажем первые 200 символов
+
+                # Если файл сжат, покажем это
+                if header_sample.startswith(b'\x1f\x8b'):
+                    st.warning("Файл выглядит как GZIP (бинарный).")
+                elif b'IONEX' in header_sample:
+                    st.success("Файл содержит сигнатуру IONEX!")
                 else:
-                    path = raw_path
-
-                # Чтение
-                ds = gr.load(path)
-
-                st.success("Данные успешно получены!")
-                fig, ax = plt.subplots(figsize=(10, 6))
-
-                if 'TEC' in ds:
-                    ds['TEC'].plot(ax=ax)
-                    st.pyplot(fig)
-                else:
-                    st.write("Структура данных:", ds)
+                    st.error("Файл не содержит ожидаемого заголовка IONEX.")
 
         except Exception as e:
-            st.error(f"Ошибка при обработке: {e}. Возможно, формат файла не поддерживается.")
+            st.error(f"Ошибка при чтении: {e}")
