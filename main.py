@@ -3,23 +3,20 @@ import earthaccess
 import georinex as gr
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
-import gzip
-import shutil
+import subprocess
 import os
 
 st.set_page_config(page_title="IonoSeis AI", layout="wide")
 st.title("🛰 IonoSeis AI: Анализ данных IONEX")
 
-# Инициализация авторизации
 try:
     earthaccess.login()
 except Exception as e:
     st.error(f"Ошибка авторизации: {e}")
 
 if st.button("🚀 Анализировать актуальные данные"):
-    with st.spinner("Загрузка и обработка..."):
+    with st.spinner("Загрузка и обработка данных..."):
         try:
-            # 1. Поиск данных
             end_date = datetime.now()
             start_date = end_date - timedelta(days=30)
 
@@ -32,33 +29,30 @@ if st.button("🚀 Анализировать актуальные данные"
             if not results:
                 st.error("Данные за последний месяц не найдены.")
             else:
-                # 2. Скачивание
                 files = earthaccess.download(results, "data")
                 raw_path = str(files[0])
 
-                # 3. Распаковка (для надежности)
-                path = raw_path
-                if raw_path.endswith('.Z') or raw_path.endswith('.gz'):
-                    path = raw_path.replace('.Z', '').replace('.gz', '') + ".rnx"
-                    with gzip.open(raw_path, 'rb') as f_in:
-                        with open(path, 'wb') as f_out:
-                            shutil.copyfileobj(f_in, f_out)
+                # Используем системную утилиту 'gunzip', которая лучше понимает .Z файлы
+                if raw_path.endswith('.Z'):
+                    # Переименовываем файл, чтобы у него было расширение .Z для gunzip
+                    uncompressed_path = raw_path.replace('.Z', '.rnx')
+                    # Вызываем системную команду для распаковки
+                    subprocess.run(['gunzip', '-c', raw_path], stdout=open(uncompressed_path, 'wb'), check=True)
+                    path = uncompressed_path
+                else:
+                    path = raw_path
 
-                # 4. Чтение БЕЗ параметра file_type
+                # Чтение
                 ds = gr.load(path)
 
-                # 5. Визуализация
                 st.success("Данные успешно получены!")
                 fig, ax = plt.subplots(figsize=(10, 6))
 
-                # Если в данных есть TEC, строим его
                 if 'TEC' in ds:
                     ds['TEC'].plot(ax=ax)
+                    st.pyplot(fig)
                 else:
-                    # Если данные имеют другую структуру, выводим что внутри
-                    st.write("Найдена структура:", ds)
-
-                st.pyplot(fig)
+                    st.write("Структура данных:", ds)
 
         except Exception as e:
-            st.error(f"Ошибка при обработке: {e}")
+            st.error(f"Ошибка при обработке: {e}. Возможно, формат файла не поддерживается.")
