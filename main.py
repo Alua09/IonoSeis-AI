@@ -7,22 +7,17 @@ import gzip
 import shutil
 import os
 
-# Настройка страницы
 st.set_page_config(page_title="IonoSeis AI", layout="wide")
 st.title("🛰 IonoSeis AI: Анализ данных IONEX")
 
-# Инициализация авторизации
-# Библиотека автоматически ищет EARTHDATA_USERNAME и EARTHDATA_PASSWORD в Secrets
 try:
     earthaccess.login()
 except Exception as e:
-    st.error(
-        f"Ошибка авторизации: {e}. Убедитесь, что логин и пароль добавлены в Settings -> Secrets на сайте Streamlit.")
+    st.error(f"Ошибка авторизации: {e}")
 
 if st.button("🚀 Анализировать актуальные данные"):
     with st.spinner("Поиск и обработка данных..."):
         try:
-            # 1. Поиск данных за последние 30 дней
             end_date = datetime.now()
             start_date = end_date - timedelta(days=30)
 
@@ -35,22 +30,20 @@ if st.button("🚀 Анализировать актуальные данные"
             if not results:
                 st.error("Данные за последний месяц не найдены.")
             else:
-                # 2. Скачивание
                 files = earthaccess.download(results, "data")
-                raw_path = files[0]
+                # ПРЕОБРАЗОВАНИЕ В СТРОКУ: raw_path теперь точно строка
+                raw_path = str(files[0])
 
-                # 3. Принудительная распаковка (если нужно)
                 path = raw_path
+                # Теперь .endswith() сработает, так как это строка
                 if raw_path.endswith('.Z') or raw_path.endswith('.gz'):
                     path = raw_path.replace('.Z', '').replace('.gz', '') + ".unpacked"
                     with gzip.open(raw_path, 'rb') as f_in:
                         with open(path, 'wb') as f_out:
                             shutil.copyfileobj(f_in, f_out)
 
-                # 4. Чтение через georinex
                 ds = gr.load(path)
 
-                # 5. Визуализация
                 st.success("Данные успешно получены!")
                 fig, ax = plt.subplots(figsize=(10, 6))
 
