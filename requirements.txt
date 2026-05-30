@@ -1,7 +1,5 @@
 streamlit
-xarray
-netCDF4
-matplotlib
-numpy
 earthaccess
 georinex
+matplotlib
+numpy
