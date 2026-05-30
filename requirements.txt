@@ -1,4 +1,6 @@
 streamlit
-earthaccess
+xarray
+netCDF4
 matplotlib
 numpy
+earthaccess
