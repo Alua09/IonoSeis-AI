@@ -4,25 +4,30 @@ import os
 import matplotlib.pyplot as plt
 import xarray as xr
 
-st.title("🛰 IonoSeis AI: Тест связи")
+st.title("🛰 IonoSeis AI: Анализ")
 
-# Проверка секретов
+# Просто вызываем login() без аргументов.
+# Библиотека сама найдет переменные EARTHDATA_USERNAME и EARTHDATA_PASSWORD в окружении.
 try:
-    user = st.secrets["EARTHDATA_USERNAME"]
-    st.write("Секреты успешно загружены!")
+    earthaccess.login()
 except Exception as e:
-    st.error("Секреты НЕ найдены! Зайдите в Settings -> Secrets на сайте.")
+    st.error(f"Ошибка авторизации: {e}")
 
-if st.button("🚀 Тест связи с NASA"):
-    with st.spinner("Авторизация..."):
+if st.button("🚀 Анализировать данные IGS"):
+    with st.spinner("Скачивание из NASA..."):
         try:
-            earthaccess.login(strategy="password",
-                              username=st.secrets["EARTHDATA_USERNAME"],
-                              password=st.secrets["EARTHDATA_PASSWORD"])
-            st.success("Авторизация прошла успешно!")
-
-            # Поиск
             results = earthaccess.search_data(short_name='GNSS_IGS_AC_ion_VTEC_comp', count=1)
-            st.write(f"Найдено файлов: {len(results)}")
+            if not results:
+                st.error("Данные не найдены")
+            else:
+                files = earthaccess.download(results, "data")
+                path = files[0]
+
+                # Работа с файлом
+                ds = xr.open_dataset(path)
+                fig, ax = plt.subplots()
+                ds['TEC'].isel(time=0).plot(ax=ax)
+                st.pyplot(fig)
+                st.success("Данные успешно загружены!")
         except Exception as e:
-            st.error(f"Ошибка: {e}")
+            st.error(f"Ошибка при скачивании или чтении: {e}")
