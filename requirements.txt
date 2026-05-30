@@ -3,3 +3,5 @@ earthaccess
 georinex
 matplotlib
 numpy
+xarray
+netCDF4
