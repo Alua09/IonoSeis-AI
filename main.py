@@ -1,39 +1,37 @@
 import streamlit as st
 import earthaccess
-import os
+import georinex as gr
 import matplotlib.pyplot as plt
-import xarray as xr
+import os
 
-st.title("🛰 IonoSeis AI: Анализ")
+st.title("🛰 IonoSeis AI: Анализ IONEX")
 
-# Просто вызываем login() без аргументов.
-# Библиотека сама найдет переменные EARTHDATA_USERNAME и EARTHDATA_PASSWORD в окружении.
-try:
-    earthaccess.login()
-except Exception as e:
-    st.error(f"Ошибка авторизации: {e}")
+earthaccess.login(strategy="netrc")
 
-if st.button("🚀 Анализировать данные IGS"):
-    with st.spinner("Поиск актуальных данных в NASA..."):
+if st.button("🚀 Анализировать данные"):
+    with st.spinner("Загрузка данных..."):
         try:
-            # 1. Поиск с ограничением по времени (чтобы не получать 404 ошибки)
+            # Ищем данные за последние дни
             results = earthaccess.search_data(
                 short_name='GNSS_IGS_AC_ion_VTEC_comp',
-                temporal=('2026-05-01', '2026-05-30'),  # Можно задать конкретный месяц
                 count=1
             )
 
-            if not results:
-                st.error("Данные за этот период не найдены.")
-            else:
-                files = earthaccess.download(results, "data")
-                path = files[0]
+            # Скачиваем
+            files = earthaccess.download(results, "data")
+            path = files[0]
 
-                # Чтение файла
-                ds = xr.open_dataset(path)
-                fig, ax = plt.subplots()
-                ds['TEC'].isel(time=0).plot(ax=ax)
-                st.pyplot(fig)
-                st.success("Данные успешно получены!")
+            # Используем georinex для чтения IONEX
+            # Он сам распознает структуру файла
+            ds = gr.load(path)
+
+            # Визуализация TEC (Total Electron Content)
+            fig, ax = plt.subplots()
+            # В IONEX данные часто хранятся в переменной TEC
+            ds['TEC'].plot(ax=ax)
+
+            st.pyplot(fig)
+            st.success("Данные успешно визуализированы!")
+
         except Exception as e:
-            st.error(f"Ошибка при скачивании: {e}")
+            st.error(f"Ошибка при обработке файла: {e}")
