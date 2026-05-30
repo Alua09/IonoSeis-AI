@@ -4,7 +4,7 @@ import georinex as gr
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import gzip
-import shutil  # <-- ЭТОТ ИМПОРТ БЫЛ НУЖЕН
+import shutil
 import os
 
 st.set_page_config(page_title="IonoSeis AI", layout="wide")
@@ -36,7 +36,7 @@ if st.button("🚀 Анализировать актуальные данные"
                 files = earthaccess.download(results, "data")
                 raw_path = str(files[0])
 
-                # 3. Распаковка
+                # 3. Распаковка (для надежности)
                 path = raw_path
                 if raw_path.endswith('.Z') or raw_path.endswith('.gz'):
                     path = raw_path.replace('.Z', '').replace('.gz', '') + ".rnx"
@@ -44,18 +44,21 @@ if st.button("🚀 Анализировать актуальные данные"
                         with open(path, 'wb') as f_out:
                             shutil.copyfileobj(f_in, f_out)
 
-                # 4. Чтение
-                ds = gr.load(path, file_type='ionex')
+                # 4. Чтение БЕЗ параметра file_type
+                ds = gr.load(path)
 
                 # 5. Визуализация
                 st.success("Данные успешно получены!")
                 fig, ax = plt.subplots(figsize=(10, 6))
 
+                # Если в данных есть TEC, строим его
                 if 'TEC' in ds:
                     ds['TEC'].plot(ax=ax)
-                    st.pyplot(fig)
                 else:
-                    st.write("Структура данных:", ds)
+                    # Если данные имеют другую структуру, выводим что внутри
+                    st.write("Найдена структура:", ds)
+
+                st.pyplot(fig)
 
         except Exception as e:
             st.error(f"Ошибка при обработке: {e}")
