@@ -1,23 +1,35 @@
 import streamlit as st
 import os
+import glob
+import xarray as xr
 import matplotlib.pyplot as plt
-import numpy as np
-import random
 
-st.set_page_config(page_title="IonoSeis AI", layout="wide")
-st.title("🛰 IonoSeis AI: Анализ ионосферы")
+st.set_page_config(page_title="IonoSeis AI: Real Data", layout="wide")
+st.title("🛰 Анализ реальных ионосферных данных")
 
-if st.button("🚀 Анализ ионосферы (Новая локация)"):
-    with st.spinner("Генерация данных..."):
-        # Симуляция данных без использования метода replace
-        data = np.random.normal(15, 3, 500) + np.sin(np.linspace(0, 10, 500)) * 5
+DATA_DIR = "data"
 
-        fig, ax = plt.subplots(figsize=(10, 4))
-        ax.set_ylim(0, 30)
-        ax.plot(data, color='#1f77b4')
 
-        city = random.choice(['Алматы', 'Токио', 'Лондон', 'Нью-Йорк', 'Кейптаун'])
-        ax.set_title(f"Данные для: {city}")
+def load_real_data():
+    # Ищем файлы в папке data (например, .nc или .ionex)
+    files = glob.glob(os.path.join(DATA_DIR, "*.nc"))  # Или ваш формат
+    if not files:
+        return None
+    # Загружаем последний файл
+    ds = xr.open_dataset(files[-1])
+    return ds
+
+
+if st.button("📊 Построить график по реальным данным"):
+    ds = load_real_data()
+    if ds is not None:
+        st.success("Данные успешно загружены!")
+
+        # Строим график по первой доступной переменной (например, TEC)
+        var_name = list(ds.data_vars)[0]
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ds[var_name].isel(time=0).plot(ax=ax)  # Берем срез данных
 
         st.pyplot(fig)
-        st.success(f"Анализ завершен для: {city}")
+    else:
+        st.error(f"Файлы не найдены в папке {DATA_DIR}. Положите туда реальный .nc или .ionex файл.")
