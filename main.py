@@ -1,5 +1,4 @@
 import streamlit as st
-import earthaccess
 import numpy as np
 import matplotlib.pyplot as plt
 import requests
@@ -7,85 +6,53 @@ import gzip
 import shutil
 import os
 from datetime import datetime, timedelta
-
-# Настройка страницы
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Система мониторинга")
-st.title("🛰 IonoSeis AI: Анализ ионосферы и сейсмоактивности")
+import earthaccess
 
 
-# --- 1. АВТОРИЗАЦИЯ И ПОИСК ---
-def setup_auth():
-    # Создаем netrc файл для earthaccess (берет данные из Secrets)
-    netrc_path = os.path.expanduser("~/.netrc")
-    with open(netrc_path, "w") as f:
-        f.write(
-            f"machine urs.earthdata.nasa.gov\nlogin {st.secrets['EARTHDATA_USERNAME']}\npassword {st.secrets['EARTHDATA_PASSWORD']}")
-    os.chmod(netrc_path, 0o600)
-    earthaccess.login(strategy="netrc")
+# --- 1. ПАРСИНГ ДАННЫХ ДЛЯ ТОЧКИ ---
+def get_vtec_for_coords(grid, lat, lon):
+    # Конвертация lat/lon в индексы сетки (71x73)
+    # Широта от -87.5 до 87.5 (шаг 2.5), Долгота от -180 до 180 (шаг 5)
+    lat_idx = int((lat + 87.5) / 2.5)
+    lon_idx = int((lon + 180) / 5.0)
+
+    # Берем значение из сетки (с учетом того, что grid - это 71x73)
+    return grid[min(lat_idx, 70), min(lon_idx, 72)]
 
 
-# --- 2. ПАРСЕР IONEX ---
-def parse_upc_ionex(file_path):
-    # Распаковка .gz
-    with gzip.open(file_path, 'rb') as f_in:
-        with open("data.ionex", 'wb') as f_out: shutil.copyfileobj(f_in, f_out)
+# --- 2. ИНТЕРФЕЙС ---
+st.title("🛰 IonoSeis: Пульс ионосферы (Алматы vs Токио)")
 
-    tec_values = []
-    with open("data.ionex", 'r', errors='ignore') as f:
-        in_block = False
-        for line in f:
-            if 'START OF TEC MAP' in line:
-                in_block = True
-            elif 'END OF TEC MAP' in line:
-                in_block = False
-            elif in_block and not any(x in line for x in ['LAT/LON1/LON2', 'EPOCH', 'START', 'END']):
-                parts = line.split()
-                for p in parts:
-                    try:
-                        val = float(p)
-                        if val < 9000: tec_values.append(val)
-                    except:
-                        continue
-    return np.array(tec_values[:5183]).reshape((71, 73))
-
-
-# --- 3. ОСНОВНОЙ ИНТЕРФЕЙС ---
-if st.button("🚀 ОБНОВИТЬ КАРТУ (NASA + USGS)"):
+if st.button("🚀 ПОСТРОИТЬ ГРАФИКИ ПУЛЬСА"):
     try:
-        with st.spinner("Синхронизация данных..."):
-            setup_auth()
-            # Поиск файла
-            results = earthaccess.search_data(
-                short_name='GNSS_IGS_AC_ion_VTEC_comp',
-                temporal=(datetime.now() - timedelta(days=5), datetime.now()),
-                count=1
-            )
-            files = earthaccess.download(results, "./tmp")
+        # (Предполагаем, что файл уже скачан в ./tmp/ через earthaccess)
+        grid = parse_upc_ionex("./tmp/UPC0OPSFIN_20261210000_01D_02H_GIM.INX.gz")
 
-            # Парсинг
-            grid = parse_upc_ionex(files[0])
+        # Координаты городов
+        locations = {
+            "Алматы": (43.2, 76.9),
+            "Токио": (35.6, 139.6)
+        }
 
-            # Визуализация
-            fig, ax = plt.subplots(figsize=(12, 6))
-            im = ax.imshow(np.flipud(grid.T), cmap='jet', interpolation='bicubic',
-                           extent=[-180, 180, -87.5, 87.5], aspect='auto', alpha=0.8)
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
 
-            # Наложение землетрясений (USGS)
-            quakes = requests.get(
-                "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=5&limit=20").json()
-            for f in quakes['features']:
-                lon, lat = f['geometry']['coordinates'][:2]
-                ax.scatter(lon, lat, color='white', marker='*', s=120, edgecolors='black', label='EQ (>5.0)')
+        # График для Алматы
+        vtec_almaty = get_vtec_for_coords(grid, *locations["Алматы"])
+        ax1.plot([vtec_almaty] * 5, label='VTEC Almaty', color='green', marker='o')
+        ax1.set_title("Гармоника ионосферы: Алматы")
+        ax1.grid(True)
 
-            # Наложение аномалий (VTEC > 700)
-            anom_y, anom_x = np.where(grid.T > 700)
-            ax.scatter((anom_x * (360 / 73) - 180), (anom_y * (175 / 71) - 87.5),
-                       color='red', s=10, alpha=0.5, label='Аномалия')
+        # График для Токио
+        vtec_tokyo = get_vtec_for_coords(grid, *locations["Токио"])
+        ax2.plot([vtec_tokyo] * 5, label='VTEC Tokyo', color='blue', marker='o')
+        ax2.set_title("Гармоника ионосферы: Токио")
+        ax2.grid(True)
 
-            plt.colorbar(im, label='VTEC')
-            ax.set_title("Глобальная карта: Ионосфера vs Сейсмические события")
-            st.pyplot(fig)
-            st.success("Данные успешно синхронизированы.")
+        st.pyplot(fig)
+
+        st.write("### Анализ:")
+        st.write(f"Текущий уровень VTEC в Алматы: {vtec_almaty:.2f}")
+        st.write(f"Текущий уровень VTEC в Токио: {vtec_tokyo:.2f}")
 
     except Exception as e:
-        st.error(f"Ошибка процесса: {e}")
+        st.error(f"Ошибка построения графиков: {e}")
