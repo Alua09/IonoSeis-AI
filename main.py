@@ -1,65 +1,57 @@
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
-import earthaccess
-import gzip
-import shutil
+import re
 
 st.set_page_config(layout="wide")
-st.title("🛰 IonoSeis AI: Финальный Парсер")
+st.title("🛰 IonoSeis AI: Анализ временного ряда (Змейка)")
 
-if st.button("🚀 Построить карту"):
+# Укажите координаты точки интереса (например, Алматы)
+lat_target, lon_target = 43.2, 76.9
+
+if st.button("🚀 Построить гармонический график"):
     try:
-        # 1. Скачивание
-        results = earthaccess.search_data(short_name='GNSS_IGS_AC_ion_VTEC_comp', temporal=('2026-05-20', '2026-05-31'),
-                                          count=1)
-        session = earthaccess.login(persist=True).get_session()
-        response = session.get(results[0].data_links()[0], stream=True)
-        with open("data.ionex.gz", 'wb') as f:
-            f.write(response.content)
-        with gzip.open("data.ionex.gz", 'rb') as f_in:
-            with open("data.ionex", 'wb') as f_out: shutil.copyfileobj(f_in, f_out)
+        # 1. Мы читаем данные из нескольких файлов (имитация серии)
+        # В реальной работе здесь будет цикл по списку файлов IONEX
+        raw_data = []
+        # Допустим, мы извлекли значения TEC для конкретной точки из 30 дней:
+        # Генерируем "гармонику" с шумом
+        days = np.arange(30)
+        base = 15 + 5 * np.sin(days / 3)  # "Змейка"
+        noise = np.random.normal(0, 1, 30)
+        series = base + noise
 
-        # 2. Чтение данных
-        tec_values = []
-        with open("data.ionex", 'r') as f:
-            in_block = False
-            for line in f:
-                if 'START OF TEC MAP' in line:
-                    in_block = True
-                elif 'END OF TEC MAP' in line:
-                    in_block = False
-                elif in_block and 'LAT/LON1/LON2' not in line:
-                    # Чистим строку и берем только числа
-                    parts = line.split()
-                    for p in parts:
-                        try:
-                            val = float(p)
-                            if val < 9000: tec_values.append(val)
-                        except:
-                            continue
+        # Вносим аномалии
+        series[5] += 8
+        series[20] -= 7
 
-        # 3. Сборка сетки (NRCAN GIM это 71 широта на 73 долготы)
-        # Мы преобразуем список в массив и сразу меняем ориентацию
-        data = np.array(tec_values)
-        if len(data) >= 5183:
-            # Магия здесь: чтобы убрать полосы, мы используем reshape 71x73
-            # и транспонируем, а затем разворачиваем, если надо
-            grid = data[:5183].reshape((71, 73))
+        # 2. Расчет границ нормы (Moving Average или Mean +/- 2*Std)
+        mean = np.mean(series)
+        std = np.std(series)
+        upper = mean + 2 * std
+        lower = mean - 2 * std
 
-            # Если полосы остались, значит массив надо перевернуть
-            # Попробуйте этот вариант:
-            final_grid = np.flipud(grid.T)
+        # 3. Визуализация
+        fig, ax = plt.subplots(figsize=(12, 5))
 
-            fig, ax = plt.subplots(figsize=(10, 5))
-            # origin='lower' + extent = правильная география
-            im = ax.imshow(final_grid, cmap='jet', origin='lower', aspect='auto',
-                           extent=[-180, 180, -87.5, 87.5])
+        # Рисуем "Змейку"
+        ax.plot(series, color='blue', label='VTEC (TEC units)', linewidth=2)
 
-            plt.colorbar(im, label='VTEC')
-            st.pyplot(fig)
-        else:
-            st.error(f"Данных не хватает: {len(data)}. Файл битый.")
+        # Рисуем "Зеленую зону"
+        ax.axhspan(lower, upper, color='green', alpha=0.2, label='Безопасная зона')
+
+        # Рисуем "Красные точки" (аномалии)
+        anomalies = (series > upper) | (series < lower)
+        ax.scatter(np.where(anomalies)[0], series[anomalies], color='red', s=100, label='Аномалия', zorder=5)
+
+        ax.set_title(f"Ионосферный мониторинг (Координаты: {lat_target}, {lon_target})")
+        ax.set_xlabel("Дни")
+        ax.set_ylabel("VTEC")
+        ax.legend()
+        ax.grid(True, linestyle='--', alpha=0.6)
+
+        st.pyplot(fig)
+        st.success("График готов!")
 
     except Exception as e:
         st.error(f"Ошибка: {e}")
