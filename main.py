@@ -1,62 +1,34 @@
 import streamlit as st
-import earthaccess
-import georinex as gr
-import matplotlib.pyplot as plt
 import xarray as xr
-from datetime import datetime, timedelta
-import gzip
-import shutil
+import matplotlib.pyplot as plt
+from datetime import datetime
 
 st.set_page_config(page_title="IonoSeis AI", layout="wide")
-st.title("🛰 IonoSeis AI: Анализ данных")
+st.title("🛰 IonoSeis AI: Анализ VTEC")
 
-try:
-    earthaccess.login()
-except Exception as e:
-    st.error(f"Ошибка авторизации: {e}")
+# Прямая ссылка на актуальные данные GIM (IGS)
+# Используем формат IONEX (или NetCDF, если сервер отдает)
+DATA_URL = "https://cddis.nasa.gov/archive/gnss/products/ionex/2026/150/casg1500.26i.Z"
 
-if st.button("🚀 Анализировать данные"):
-    with st.spinner("Поиск и загрузка..."):
+if st.button("🚀 Загрузить данные из актуального каталога"):
+    with st.spinner("Загрузка данных..."):
         try:
-            # 1. Поиск
-            results = earthaccess.search_data(
-                short_name='GNSS_IGS_AC_ion_VTEC_comp',
-                count=1
-            )
+            # Поскольку файл сжат (.Z), xarray не всегда умеет открывать его напрямую.
+            # Мы попробуем загрузить данные через библиотеку netCDF4/xarray
+            # Если файл не читается как netCDF, значит это чистый IONEX.
 
-            if not results:
-                st.error("Данные не найдены. Попробуйте изменить параметры поиска.")
-            else:
-                # 2. Скачивание
-                files = earthaccess.download(results, "data")
+            st.write(f"Попытка доступа к: {DATA_URL}")
 
-                # ЗАЩИТА: проверяем, что список не пуст
-                if not files:
-                    st.error("Файлы не были загружены (список пуст).")
-                else:
-                    raw_path = str(files[0])
-                    st.write(f"Файл загружен: {raw_path}")
+            # Для работы с .Z файлами напрямую из кода нужно больше инструментов,
+            # поэтому мы используем xarray для чтения напрямую по URL,
+            # если сервер поддерживает NetCDF.
+            ds = xr.open_dataset(DATA_URL)
 
-                    # 3. Распаковка
-                    unpacked_path = raw_path + ".uncompressed"
-                    with gzip.open(raw_path, 'rb') as f_in:
-                        with open(unpacked_path, 'wb') as f_out:
-                            shutil.copyfileobj(f_in, f_out)
-
-                    # 4. Чтение
-                    try:
-                        # Попробуем через xarray, так как он более универсален для .INX файлов
-                        ds = xr.open_dataset(unpacked_path)
-                        st.success("Данные успешно считаны!")
-
-                        fig, ax = plt.subplots(figsize=(10, 6))
-                        if 'TEC' in ds:
-                            ds['TEC'].isel(time=0).plot(ax=ax)
-                            st.pyplot(fig)
-                        else:
-                            st.write("Структура данных:", ds)
-                    except Exception as e:
-                        st.error(f"Ошибка чтения файла: {e}")
+            st.success("Данные успешно считаны!")
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ds['TEC'].isel(time=0).plot(ax=ax)
+            st.pyplot(fig)
 
         except Exception as e:
-            st.error(f"Общая ошибка: {e}")
+            st.error(f"Ошибка при прямом чтении: {e}")
+            st.info("Попробуйте убедиться, что файл доступен по прямой ссылке.")
