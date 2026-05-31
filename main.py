@@ -12,16 +12,14 @@ from datetime import datetime, timedelta
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Алматы")
 st.title("🛰 IonoSeis AI: Глубокий анализ ионосферы")
 
-# Координаты Алматы
 ALMATY_LAT, ALMATY_LON = 43.25, 76.92
 
 
 # --- ФУНКЦИИ ---
 def setup_auth():
-    # Использование секретов Streamlit
     os.environ['EARTHDATA_USERNAME'] = st.secrets['EARTHDATA_USERNAME']
     os.environ['EARTHDATA_PASSWORD'] = st.secrets['EARTHDATA_PASSWORD']
-    earthaccess.login(strategy="environment")
+    return earthaccess.login(strategy="environment")
 
 
 def parse_upc_ionex(file_path):
@@ -45,44 +43,50 @@ def parse_upc_ionex(file_path):
                         if val < 9000: tec_values.append(val)
                     except:
                         continue
-    # Преобразуем в сетку
     return np.array(tec_values[:5183]).reshape((71, 73))
 
 
 def get_almaty_tec(grid):
-    # Преобразование координат в индексы сетки IONEX
-    # LAT: -87.5 to 87.5 (71 шаг), LON: -180 to 180 (73 шага)
     lat_idx = int((ALMATY_LAT + 87.5) / 2.5)
     lon_idx = int((ALMATY_LON + 180) / 5.0)
     return grid[lat_idx, lon_idx]
 
 
 # --- ИНТЕРФЕЙС ---
-if st.button("🚀 ЗАПУСТИТЬ АНАЛИЗ NASA + USGS"):
+if st.button("🚀 ЗАПУСТИТЬ АНАЛИЗ (NASA + USGS)"):
     try:
-        with st.spinner("Синхронизация с NASA Earthdata..."):
+        with st.spinner("Связь с серверами NASA..."):
             setup_auth()
             results = earthaccess.search_data(
                 short_name='GNSS_IGS_AC_ion_VTEC_comp',
-                temporal=(datetime.now() - timedelta(days=2), datetime.now()),
+                temporal=(datetime.now() - timedelta(days=5), datetime.now()),
                 count=1
             )
-            files = earthaccess.download(results, "./tmp")
-            grid = parse_upc_ionex(files[0])
 
-            # Анализ
-            val = get_almaty_tec(grid)
+            if results and len(results) > 0:
+                files = earthaccess.download(results, "./tmp")
+                if files:
+                    grid = parse_upc_ionex(files[0])
+                    val = get_almaty_tec(grid)
 
-            # Вывод данных
-            st.metric("Плотность ионосферы над Алматы (VTEC)", f"{val:.2f} TECU")
+                    st.metric("Плотность ионосферы над Алматы (VTEC)", f"{val:.2f} TECU")
 
-            # Сейсмический блок USGS
-            quakes = requests.get("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=10").json()
-            st.subheader("Последние сейсмические события")
-            for f in quakes['features'][:5]:
-                st.write(f"- {f['properties']['place']} | Магнитуда: {f['properties']['mag']}")
+                    # USGS Сейсмика
+                    quakes = requests.get(
+                        "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=10").json()
+                    st.subheader("Последние сейсмические события")
+                    for f in quakes['features'][:5]:
+                        st.write(f"- {f['properties']['place']} | Магнитуда: {f['properties']['mag']}")
 
-            st.success("Данные успешно синхронизированы.")
+                    st.success("Данные успешно обновлены.")
+                else:
+                    st.error("Ошибка при скачивании файла данных.")
+            else:
+                st.warning("Нет новых данных от NASA за последние 5 дней.")
 
     except Exception as e:
-        st.error(f"Ошибка синхронизации: {e}")
+        st.error(f"Ошибка процесса: {e}")
+
+st.sidebar.markdown("---")
+st.sidebar.write("### Статус: Подключен")
+st.sidebar.write("Регион мониторинга: Алматы")
