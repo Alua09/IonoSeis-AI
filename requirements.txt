@@ -1,10 +1,5 @@
 streamlit
 earthaccess
-georinex
-matplotlib
 numpy
-xarray
-netCDF4
-h5netcdf
+matplotlib
 requests
-ionex
