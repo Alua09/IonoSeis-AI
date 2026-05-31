@@ -1,11 +1,15 @@
 import streamlit as st
 import pandas as pd
 import requests
+import json
+import os
 
+# Настройка страницы
 st.set_page_config(page_title="IonoSeis Pro", layout="wide")
 st.title("🛰 IonoSeis: Мониторинг сейсмики и ионосферы")
 
 ALMATY_LAT, ALMATY_LON = 43.25, 76.92
+KP_CACHE = "kp_cache.json"
 
 
 # 1. Сейсмика
@@ -19,22 +23,28 @@ def get_seismic():
         return None
 
 
-# 2. Ионосфера (Kp-индекс) с двойным резервированием
-@st.cache_data(ttl=300)
+# 2. Ионосфера (с резервированием и кэшем)
 def get_kp_index():
-    # Попытка 1: NOAA
-    try:
-        url = "https://services.swpc.noaa.gov/products/noaa-k-index.json"
-        data = requests.get(url, timeout=10).json()
-        return pd.DataFrame(data[1:], columns=['time', 'kp'])
-    except:
-        # Попытка 2: Резерв GFZ (Потсдам)
+    urls = [
+        "https://services.swpc.noaa.gov/products/noaa-k-index.json",
+        "https://kp.gfz-potsdam.de/app/files/Kp_ap_Ap_SN_F10.7_nowcast.json"
+    ]
+    for url in urls:
         try:
-            url = "https://kp.gfz-potsdam.de/app/files/Kp_ap_Ap_SN_F10.7_nowcast.json"
-            data = requests.get(url, timeout=10).json()
-            return pd.DataFrame(data, columns=['time', 'kp'])
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                with open(KP_CACHE, 'w') as f:
+                    json.dump(data, f)
+                return pd.DataFrame(data[1:], columns=['time', 'kp'])
         except:
-            return None
+            continue
+
+    if os.path.exists(KP_CACHE):
+        with open(KP_CACHE, 'r') as f:
+            data = json.load(f)
+            return pd.DataFrame(data[1:], columns=['time', 'kp'])
+    return None
 
 
 # --- ИНТЕРФЕЙС ---
@@ -44,6 +54,7 @@ if st.button("🚀 ОБНОВИТЬ ДАННЫЕ"):
 
     col1, col2 = st.columns(2)
 
+    # Сейсмо-блок
     with col1:
         st.subheader("⚠️ Сейсмика (Алматы 300 км)")
         if seismic:
@@ -61,17 +72,16 @@ if st.button("🚀 ОБНОВИТЬ ДАННЫЕ"):
         else:
             st.error("Сервер сейсмики недоступен.")
 
+    # Ионосферный блок
     with col2:
         st.subheader("☀️ Ионосфера (Kp-Index)")
         if kp_df is not None and not kp_df.empty:
-            try:
-                kp_val = float(kp_df.iloc[-1]['kp'])
-                if kp_val < 4:
-                    st.success(f"Зона безопасности: Стабильно (Kp: {kp_val})")
-                else:
-                    st.error(f"ВНИМАНИЕ: Геомагнитная активность! (Kp: {kp_val})")
-                st.line_chart(kp_df.tail(15).set_index('time')['kp'])
-            except:
-                st.warning("Данные получены, но формат требует уточнения.")
+            kp_val = float(kp_df.iloc[-1]['kp'])
+            status = "Стабильно" if kp_val < 4 else "АКТИВНОСТЬ"
+            st.metric("Kp-индекс", kp_val, status)
+            st.line_chart(kp_df.tail(15).set_index('time')['kp'])
         else:
-            st.warning("Все источники данных ионосферы временно недоступны. Попробуйте позже.")
+            st.warning("Данные ионосферы пока не загружены. Нажмите кнопку.")
+
+st.sidebar.markdown("---")
+st.sidebar.write("Статус системы: **Активна**")
