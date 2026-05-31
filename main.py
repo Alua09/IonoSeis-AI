@@ -7,44 +7,39 @@ import os
 import xarray as xr
 from datetime import datetime, timedelta
 
-# Настройки страницы
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Реальные данные")
-st.title("🛰 IonoSeis AI: Анализ на реальных данных NASA")
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Анализ")
 
 
-# --- ФУНКЦИЯ АВТОРИЗАЦИИ ---
+# --- «ХИТРАЯ» ФУНКЦИЯ АВТОРИЗАЦИИ ---
 def authenticate():
-    # Получаем секреты из настроек Streamlit (secrets.toml или Cloud Secrets)
     user = st.secrets.get("EARTHDATA_USERNAME") or os.getenv('EARTHDATA_USERNAME')
     pwd = st.secrets.get("EARTHDATA_PASSWORD") or os.getenv('EARTHDATA_PASSWORD')
 
-    if not user or not pwd:
-        st.error("Ошибка: Секреты (логин/пароль) не найдены!")
-        st.stop()
+    # Создаем файл .netrc в домашней директории программы
+    netrc_path = os.path.expanduser("~/.netrc")
+    with open(netrc_path, "w") as f:
+        f.write(f"machine urs.earthdata.nasa.gov login {user} password {pwd}")
 
-    # Авторизуемся без поиска файла .netrc
-    earthaccess.login(username=user, password=pwd)
+    # Теперь earthaccess найдет файл, который мы только что создали
+    earthaccess.login(strategy="netrc")
 
 
-# --- ФУНКЦИЯ ЗАГРУЗКИ ---
+# --- ОСТАЛЬНОЙ КОД ---
 def get_latest_data(lat, lon):
-    # Поиск файлов GIM IONEX
     results = earthaccess.search_data(
         short_name='GIM_IONEX',
-        temporal=(datetime.now() - timedelta(days=5), datetime.now())
+        temporal=(datetime.now() - timedelta(days=2), datetime.now())
     )
-    # Скачивание файла в папку /tmp (для Streamlit Cloud)
     files = earthaccess.download(results[0], "./tmp")
     ds = xr.open_dataset(files[0])
     return ds.sel(lat=lat, lon=lon, method='nearest').TEC.values
 
 
-# --- ИНТЕРФЕЙС ---
 if st.button("🚀 ЗАГРУЗИТЬ И АНАЛИЗИРОВАТЬ"):
     try:
-        with st.spinner("Авторизация и загрузка..."):
+        with st.spinner("Авторизация..."):
             authenticate()
-            st.write("✅ Авторизация успешна. Обработка данных из NASA...")
+            st.write("✅ Авторизация успешна. Скачивание данных...")
 
             locations = {"Алматы": (43.2, 76.9), "Токио": (35.7, 139.7)}
             fig, axes = plt.subplots(2, 1, figsize=(14, 12))
@@ -52,7 +47,7 @@ if st.button("🚀 ЗАГРУЗИТЬ И АНАЛИЗИРОВАТЬ"):
 
             for i, (city, (lat, lon)) in enumerate(locations.items()):
                 series = get_latest_data(lat, lon)[:30]
-                kp_data = np.random.randint(0, 6, 30)  # В будущем заменить на API NOAA
+                kp_data = np.random.randint(0, 6, 30)
 
                 mean, std = np.mean(series), np.std(series)
                 upper = mean + 2 * std
@@ -65,8 +60,8 @@ if st.button("🚀 ЗАГРУЗИТЬ И АНАЛИЗИРОВАТЬ"):
                 ax2.bar(dates, kp_data, color='orange', alpha=0.2, label='Kp-индекс')
 
                 ax1.set_title(f"Регион: {city}")
-                ax1.legend(loc='upper left')
-                ax2.legend(loc='upper right')
+                ax1.legend();
+                ax2.legend()
 
             st.pyplot(fig)
     except Exception as e:
