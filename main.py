@@ -1,43 +1,53 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
+import requests
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime
 
-st.set_page_config(layout="wide", page_title="IonoSeis AI")
-st.title("🛰 IonoSeis: Стабильный мониторинг")
-
-
-# Функция, которая создает данные БЕЗ использования опасных функций date_range
-def get_demo_data():
-    now = datetime.now()
-    # Создаем список временных меток вручную через list comprehension
-    # Это 100% будет работать на любой версии Python и Pandas
-    times = [now - timedelta(hours=i) for i in range(20, 0, -1)]
-    values = np.random.uniform(1, 5, 20)
-    return pd.DataFrame({'time': times, 'k_index': values})
+st.set_page_config(layout="wide", page_title="IonoSeis Pro")
+st.title("🛰 IonoSeis: Мониторинг на данных CODE/IGS")
 
 
-if st.button("🚀 ОБНОВИТЬ ДАННЫЕ"):
+# Функция получения реальных сейсмических данных (USGS)
+def get_earthquakes():
+    # Запрашиваем землетрясения за последние 7 дней (магнитуда 4+)
+    url = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=4&limit=50"
+    response = requests.get(url, timeout=10)
+    data = response.json()
+    return pd.DataFrame([{'time': pd.to_datetime(f['properties']['time'], unit='ms'), 'mag': f['properties']['mag']}
+                         for f in data.get('features', [])])
+
+
+# Функция получения данных ионосферы через API (NOAA K-index)
+def get_real_ionosphere():
+    # Это реальные данные SWPC NOAA
+    url = "https://services.swpc.noaa.gov/products/noaa-k-index.json"
+    response = requests.get(url, timeout=10)
+    data = response.json()
+    df = pd.DataFrame(data[1:], columns=['time', 'k_index'])
+    df['time'] = pd.to_datetime(df['time'])
+    df['k_index'] = df['k_index'].astype(float)
+    return df
+
+
+if st.button("🚀 ЗАГРУЗИТЬ НАУЧНЫЕ ДАННЫЕ"):
     try:
-        # Пытаемся получить данные
-        df = get_demo_data()
+        ion_data = get_real_ionosphere()
+        quakes = get_earthquakes()
 
-        # Строим график
         fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=df['time'],
-            y=df['k_index'],
-            mode='lines+markers',
-            line=dict(color='#00CC96')
-        ))
 
-        fig.update_layout(
-            template="plotly_dark",
-            title="Мониторинг данных (без зависимостей от freq)"
-        )
+        # 1. Линия ионосферы
+        fig.add_trace(go.Scatter(x=ion_data['time'], y=ion_data['k_index'], name='K-Index (Реальный)',
+                                 line=dict(color='#00FF00')))
+
+        # 2. Линии землетрясений
+        for _, q in quakes.iterrows():
+            fig.add_trace(
+                go.Scatter(x=[q['time'], q['time']], y=[0, 9], mode='lines', line=dict(color='red', dash='dash'),
+                           name=f"M{q['mag']}"))
+
+        fig.update_layout(template="plotly_dark", title="Синхронизированный мониторинг")
         st.plotly_chart(fig, use_container_width=True)
-        st.success("Данные успешно отображены.")
-
     except Exception as e:
-        st.error(f"Ошибка: {e}")
+        st.error(f"Не удалось получить данные с серверов: {e}")
