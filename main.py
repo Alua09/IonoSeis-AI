@@ -2,44 +2,64 @@ import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 import requests
+import patoolib
+import os
 from datetime import datetime
 
 st.set_page_config(layout="wide")
-st.title("🛰 IonoSeis AI: Отладчик соединений NASA")
+st.title("🛰 IonoSeis AI: Полная обработка данных")
 
-# Данные для входа
-USER = st.secrets.get("EARTHDATA_USERNAME", "")
-PASSWORD = st.secrets.get("EARTHDATA_PASSWORD", "")
+# Данные авторизации
+USER = st.secrets["EARTHDATA_USERNAME"]
+PASSWORD = st.secrets["EARTHDATA_PASSWORD"]
 
 
-def check_and_fetch():
-    # На 31 мая 2026 года (сегодня) год 2026, день 151
-    day_of_year = datetime.now().strftime("%j")
+def process_data():
+    day = datetime.now().strftime("%j")
     year = datetime.now().strftime("%y")
+    url = f"https://cddis.nasa.gov/archive/gnss/products/ionex/2026/{day}/igsg{day}0.{year}i.Z"
 
-    # Пытаемся сформировать правильный URL
-    url = f"https://cddis.nasa.gov/archive/gnss/products/ionex/2026/{day_of_year}/igsg{day_of_year}0.{year}i.Z"
+    # 1. Скачивание
+    response = requests.get(url, auth=(USER, PASSWORD))
+    with open("data.Z", "wb") as f:
+        f.write(response.content)
 
-    st.write(f"Пробую скачать по адресу: {url}")
+    # 2. Распаковка
+    patoolib.extract_archive("data.Z", outdir=".", verbosity=-1)
+    # После распаковки файл будет называться igsg...i
+    extracted_file = f"igsg{day}0.{year}i"
 
-    session = requests.Session()
-    session.auth = (USER, PASSWORD)
+    # 3. Парсинг
+    tec_values = []
+    with open(extracted_file, 'r', errors='ignore') as f:
+        in_block = False
+        for line in f:
+            if 'START OF TEC MAP' in line:
+                in_block = True
+            elif 'END OF TEC MAP' in line:
+                in_block = False
+            elif in_block and any(c.isdigit() for c in line.split()):
+                for p in line.split():
+                    try:
+                        val = float(p)
+                        if val < 9000: tec_values.append(val)
+                    except:
+                        continue
+    return np.array(tec_values).reshape((71, 73))
 
-    response = session.get(url, stream=True)
 
-    if response.status_code == 200:
-        with open("data.ionex", 'wb') as f:
-            f.write(response.content)
-        return True, "Файл успешно скачан!"
-    else:
-        return False, f"Ошибка {response.status_code}. Возможно, файл еще не появился в архиве."
+if st.button("🚀 ПОСТРОИТЬ КАРТУ"):
+    try:
+        grid = process_data()
 
+        fig, ax = plt.subplots(figsize=(10, 5))
+        im = ax.imshow(np.flipud(grid.T), cmap='jet', interpolation='bicubic',
+                       extent=[-180, 180, -87.5, 87.5], aspect='auto')
 
-if st.button("🚀 ПРОВЕРИТЬ СОЕДИНЕНИЕ"):
-    success, message = check_and_fetch()
-    if success:
-        st.success(message)
-    else:
-        st.error(message)
-        st.info(
-            "💡 Совет: Скопируйте ссылку выше и откройте её в браузере вручную. Если браузер тоже выдаст ошибку, значит, проблема в ссылке.")
+        plt.colorbar(im, label='VTEC')
+        ax.set_title("Актуальная карта VTEC")
+        st.pyplot(fig)
+
+        st.success("Данные успешно обработаны.")
+    except Exception as e:
+        st.error(f"Ошибка при парсинге: {e}")
