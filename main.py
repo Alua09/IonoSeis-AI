@@ -4,7 +4,7 @@ import requests
 import json
 import os
 
-st.set_page_config(layout="wide", page_title="IonoSeis Pro: Финал")
+st.set_page_config(layout="wide", page_title="IonoSeis: Финал")
 st.title("🛰 IonoSeis: Сейсмо-ионосферная панель (Алматы)")
 
 ALMATY_LAT, ALMATY_LON = 43.25, 76.92
@@ -13,15 +13,16 @@ CACHE_FILE = "data_cache.json"
 
 def get_full_data():
     try:
-        # Сейсмика
+        # 1. Сейсмика (USGS)
         res_q = requests.get("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=100", timeout=8)
-        # Геомагнитный индекс Kp (альтернативный надежный API)
-        res_k = requests.get("https://services.swpc.noaa.gov/text/wing-kp-index.txt", timeout=8)
+        # 2. Kp-индекс (стабильный JSON источник NOAA)
+        res_k = requests.get("https://services.swpc.noaa.gov/products/noaa-k-index.json", timeout=8)
 
-        data = {'quakes': res_q.json(), 'kp_raw': res_k.text}
-        with open(CACHE_FILE, 'w') as f:
-            json.dump(data, f)
-        return data
+        if res_q.status_code == 200 and res_k.status_code == 200:
+            data = {'quakes': res_q.json(), 'kp_data': res_k.json()}
+            with open(CACHE_FILE, 'w') as f:
+                json.dump(data, f)
+            return data
     except:
         if os.path.exists(CACHE_FILE):
             with open(CACHE_FILE, 'r') as f:
@@ -29,10 +30,10 @@ def get_full_data():
     return None
 
 
-if st.button("🚀 ОБНОВИТЬ СЕЙСМО-ИОНОСФЕРНЫЙ ДАННЫЕ"):
+if st.button("🚀 ОБНОВИТЬ СЕЙСМО-ИОНОСФЕРНЫЕ ДАННЫЕ"):
     data = get_full_data()
     if data:
-        # --- Сейсмика ---
+        # --- Сейсмика Алматы ---
         features = data['quakes'].get('features', [])
         records = [{'place': f['properties']['place'], 'mag': f['properties']['mag'],
                     'lat': f['geometry']['coordinates'][1], 'lon': f['geometry']['coordinates'][0]} for f in features]
@@ -43,12 +44,10 @@ if st.button("🚀 ОБНОВИТЬ СЕЙСМО-ИОНОСФЕРНЫЙ ДАНН
         st.subheader("⚠️ Сейсмические события (Радиус 300 км от Алматы)")
         st.dataframe(local[['place', 'mag', 'dist']], use_container_width=True)
 
-        # --- Ионосфера ---
+        # --- Ионосфера (Исправленный Kp-индекс) ---
         st.subheader("☀️ Состояние ионосферы (Kp-Index)")
-        st.info("Kp-индекс выше 5 указывает на геомагнитную бурю, влияющую на ионосферу.")
-        st.text(data['kp_raw'][-500:])  # Показываем последние данные из текстового потока
+        kp_df = pd.DataFrame(data['kp_data'], columns=['time', 'kp'])
+        kp_df = kp_df.tail(20)  # Последние значения
+        st.line_chart(kp_df.set_index('time')['kp'])
     else:
-        st.error("Ошибка сети. Попробуйте обновить страницу.")
-
-st.sidebar.markdown("---")
-st.sidebar.write("Статус: **Система активна**")
+        st.error("Ошибка при получении данных. Попробуйте еще раз.")
