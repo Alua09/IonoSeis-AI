@@ -1,8 +1,7 @@
 streamlit
-numpy
-matplotlib
-requests
-earthaccess
-xarray
-netCDF4
 pandas
+requests
+plotly
+numpy
+earthaccess
+matplotlib
