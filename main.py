@@ -1,39 +1,56 @@
 import streamlit as st
-import earthaccess
 import numpy as np
-from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
+import gzip
+import shutil
 import os
 
-# Авторизация (использует netrc, созданный вами ранее)
-earthaccess.login(strategy="netrc")
 
-st.title("🛰 IonoSeis AI: Глобальный поисковик")
+def parse_upc_ionex(file_path):
+    # Распаковываем .gz
+    with gzip.open(file_path, 'rb') as f_in:
+        with open("data.ionex", 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
 
-if st.button("🚀 НАЙТИ ЛЮБЫЕ ДАННЫЕ В АРХИВЕ"):
-    with st.spinner("Сканирую архивы NASA..."):
-        try:
-            # Ищем во всех возможных коллекциях IGS за 30 дней
-            collections = ['IGS_GIM', 'GNSS_IGS_AC_ion_VTEC_comp', 'GIM_IONEX']
-            found_files = []
+    tec_values = []
+    # Читаем распакованный файл
+    with open("data.ionex", 'r', errors='ignore') as f:
+        in_block = False
+        for line in f:
+            if 'START OF TEC MAP' in line:
+                in_block = True
+            elif 'END OF TEC MAP' in line:
+                in_block = False
+            elif in_block and not any(x in line for x in ['LAT/LON1/LON2', 'EPOCH']):
+                # В этом формате данные идут в одну строку, разделенные пробелами
+                parts = line.split()
+                for p in parts:
+                    try:
+                        val = float(p)
+                        if val < 9000: tec_values.append(val)
+                    except:
+                        continue
 
-            for coll in collections:
-                results = earthaccess.search_data(
-                    short_name=coll,
-                    temporal=(datetime.now() - timedelta(days=30), datetime.now()),
-                    count=5  # Берем последние 5 файлов
-                )
-                if results:
-                    st.write(f"✅ Найдено в {coll}: {len(results)} файлов")
-                    found_files = results
-                    break  # Останавливаемся на первой найденной коллекции
+    # Для UPC карт сетка обычно 71x73
+    data = np.array(tec_values)
+    return data[:5183].reshape((71, 73))
 
-            if not found_files:
-                st.error("Архив пуст. Проверьте ваш профиль на Earthdata (статус одобрения данных).")
-            else:
-                # Скачиваем первый найденный
-                files = earthaccess.download(found_files[0], "./tmp")
-                st.success(f"Успешно скачан файл: {os.path.basename(files[0])}")
-                st.write("Теперь данные готовы к парсингу!")
 
-        except Exception as e:
-            st.error(f"Ошибка поиска: {e}")
+# --- ВСТАВЬТЕ ЭТО В ВАШУ КНОПКУ ---
+if st.button("🚀 ПОСТРОИТЬ КАРТУ ИЗ UPC"):
+    try:
+        # Указываем имя скачанного файла
+        grid = parse_upc_ionex("./tmp/UPC0OPSFIN_20261210000_01D_02H_GIM.INX.gz")
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+        # Визуализация
+        im = ax.imshow(np.flipud(grid.T), cmap='jet', interpolation='bicubic',
+                       extent=[-180, 180, -87.5, 87.5], aspect='auto')
+
+        plt.colorbar(im, label='VTEC')
+        ax.set_title("Глобальная карта VTEC (UPC Analysis Center)")
+        st.pyplot(fig)
+
+        st.success("Данные успешно визуализированы!")
+    except Exception as e:
+        st.error(f"Ошибка при парсинге: {e}")
