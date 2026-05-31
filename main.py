@@ -1,54 +1,64 @@
 import streamlit as st
-import georinex as gr
+import xarray as xr
+import matplotlib.pyplot as plt
 import requests
-import earthaccess
 import gzip
 import shutil
-import os
+import earthaccess
 
 st.set_page_config(page_title="IonoSeis AI", layout="wide")
-st.title("🛰 IonoSeis AI: Анализ IONEX")
+st.title("🛰 IonoSeis AI: Анализ ионосферных данных")
 
-# Инициализация сессии (earthaccess автоматически ищет логин/пароль в Secrets)
+# 1. Авторизация
 try:
     auth = earthaccess.login(persist=True)
     session = auth.get_session()
 except Exception as e:
     st.error(f"Ошибка авторизации: {e}")
-    st.info("Убедитесь, что в Secrets добавлены EARTHDATA_USERNAME и EARTHDATA_PASSWORD")
+    st.stop()
 
-url = "https://cddis.nasa.gov/archive/gnss/products/ionex/2026/150/casg1500.26i.Z"
-
-if st.button("🚀 Найти и загрузить актуальный IONEX"):
-    with st.spinner("Поиск актуальных данных..."):
+if st.button("🚀 Найти и проанализировать данные"):
+    with st.spinner("Поиск и обработка..."):
         try:
-            # 1. Поиск актуального файла через метаданные NASA
+            # 2. Поиск файла
             results = earthaccess.search_data(
                 short_name='GNSS_IGS_AC_ion_VTEC_comp',
-                temporal=('2026-05-25', '2026-05-31'),
+                temporal=('2026-05-20', '2026-05-31'),
                 count=1
             )
 
             if not results:
-                st.error("Файлы не найдены в архиве.")
+                st.error("Данные не найдены.")
             else:
-                # Получаем прямую URL-ссылку из найденного результата
                 data_url = results[0].data_links()[0]
-                st.write(f"Найден файл: {data_url}")
+                st.write(f"Загрузка файла: {data_url}")
 
-                # 2. Скачивание найденного файла через сессию
+                # 3. Скачивание
                 response = session.get(data_url, stream=True)
+                local_filename = "data.inx.gz"
+                with open(local_filename, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
 
-                if response.status_code == 200:
-                    local_filename = "data.ionex.Z"
-                    with open(local_filename, 'wb') as f:
-                        for chunk in response.iter_content(chunk_size=8192):
-                            f.write(chunk)
+                # 4. Распаковка
+                final_path = "data.inx"
+                with gzip.open(local_filename, 'rb') as f_in:
+                    with open(final_path, 'wb') as f_out:
+                        shutil.copyfileobj(f_in, f_out)
 
-                    # ... далее код распаковки и gr.load(final_path) ...
-                    st.success("Данные успешно скачаны!")
+                # 5. Чтение и визуализация
+                ds = xr.open_dataset(final_path)
+                st.success("Данные успешно считаны!")
+
+                st.write("Структура данных:", ds)
+
+                fig, ax = plt.subplots(figsize=(10, 6))
+                # Пробуем отрисовать переменную TEC, если она есть
+                if 'TEC' in ds:
+                    ds['TEC'].isel(time=0).plot(ax=ax)
+                    st.pyplot(fig)
                 else:
-                    st.error(f"Ошибка при скачивании {data_url}: код {response.status_code}")
+                    st.warning("Переменная 'TEC' не найдена. Проверьте имена переменных в выводе выше.")
 
         except Exception as e:
             st.error(f"Ошибка: {e}")
