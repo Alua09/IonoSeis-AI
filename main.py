@@ -1,54 +1,37 @@
 import streamlit as st
 import earthaccess
-import os
-import requests
 import numpy as np
 import matplotlib.pyplot as plt
-from datetime import datetime
+import os
+from datetime import datetime, timedelta
 
-st.set_page_config(layout="wide", page_title="IonoSeis AI")
-st.title("🛰 IonoSeis AI: Мониторинг VTEC")
+# 1. Авторизация (используем среду, чтобы не светить пароли)
+# В Streamlit Cloud добавьте EARTHDATA_USERNAME и EARTHDATA_PASSWORD в Secrets
+earthaccess.login(strategy="netrc")
 
+st.title("🛰 IonoSeis AI: Финальная попытка")
 
-def setup_earthdata_auth():
-    """Создает файл .netrc для автоматической авторизации"""
-    netrc_content = (
-        f"machine urs.earthdata.nasa.gov\n"
-        f"login {st.secrets['EARTHDATA_USERNAME']}\n"
-        f"password {st.secrets['EARTHDATA_PASSWORD']}"
-    )
-    # Записываем в домашнюю директорию
-    netrc_path = os.path.expanduser("~/.netrc")
-    with open(netrc_path, "w") as f:
-        f.write(netrc_content)
-    # Устанавливаем права доступа (важно для Linux/Cloud)
-    os.chmod(netrc_path, 0o600)
-
-    # Теперь логинимся без явной передачи аргументов
-    return earthaccess.login(strategy="netrc")
-
-
-if st.button("🚀 ЗАПУСК МОНИТОРИНГА"):
+if st.button("🚀 СКАЧАТЬ И ОБРАБОТАТЬ"):
     try:
-        with st.spinner("Авторизация и поиск данных..."):
-            setup_earthdata_auth()
+        # Ищем данные за последние 2 дня
+        results = earthaccess.search_data(
+            short_name='GNSS_IGS_AC_ion_VTEC_comp',
+            temporal=(datetime.now() - timedelta(days=2), datetime.now()),
+            count=1
+        )
 
-            # Поиск данных
-            results = earthaccess.search_data(
-                short_name='GNSS_IGS_AC_ion_VTEC_comp',
-                temporal=(datetime.now(), datetime.now()),
-                count=1
-            )
+        if not results:
+            st.error("Данные не найдены. Вы нажали '+' (зеленый плюс) в Earthdata Search?")
+            st.stop()
 
-            if not results:
-                st.error("Данные не найдены. Проверьте настройки коллекции.")
-                st.stop()
+        # Скачиваем файл
+        files = earthaccess.download(results, "./tmp")
 
-            # Скачивание напрямую через библиотеку
-            files = earthaccess.download(results, "./tmp")
+        st.success(f"Файл успешно скачан: {files[0]}")
 
-            st.success(f"Файл скачан: {files[0]}")
-            st.write("Теперь вы можете использовать парсер для обработки этого файла.")
+        # Парсинг (мы теперь знаем, что это корректный файл из вашей коллекции)
+        # Если возникнет ошибка при открытии файла, мы поймем, что дело в формате
+        st.write("Файл получен, переходим к этапу визуализации.")
 
     except Exception as e:
-        st.error(f"Ошибка: {e}")
+        st.error(f"Критическая ошибка: {e}")
