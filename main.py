@@ -8,7 +8,6 @@ st.title("🛰 IonoSeis: Полный мониторинг")
 ALMATY_LAT, ALMATY_LON = 43.25, 76.92
 
 
-# 1. Функция сейсмики
 @st.cache_data(ttl=300)
 def get_seismic():
     try:
@@ -18,11 +17,9 @@ def get_seismic():
         return None
 
 
-# 2. Функция ионосферы (Kp-индекс)
 @st.cache_data(ttl=300)
 def get_kp_index():
     try:
-        # Используем стабильный JSON-источник
         url = "https://services.swpc.noaa.gov/products/noaa-k-index.json"
         data = requests.get(url, timeout=10).json()
         return pd.DataFrame(data[1:], columns=['time', 'kp'])
@@ -47,8 +44,12 @@ if st.button("🚀 ОБНОВИТЬ СИСТЕМУ"):
             df = pd.DataFrame(records)
             df['dist'] = ((df['lat'] - ALMATY_LAT) ** 2 + (df['lon'] - ALMATY_LON) ** 2) ** 0.5 * 111
             local = df[df['dist'] < 300].sort_values(by='dist')
-            st.dataframe(local[['place', 'mag', 'dist']], use_container_width=True) if not local.empty else st.info(
-                "Тишина")
+
+            # РАЗДЕЛЬНЫЙ IF-ELSE ДЛЯ ИСКЛЮЧЕНИЯ СИНТАКСИЧЕСКИХ ОШИБОК
+            if not local.empty:
+                st.dataframe(local[['place', 'mag', 'dist']], use_container_width=True)
+            else:
+                st.info("Тишина: событий в радиусе 300 км не зафиксировано.")
         else:
             st.error("Сервер сейсмики недоступен")
 
@@ -56,11 +57,10 @@ if st.button("🚀 ОБНОВИТЬ СИСТЕМУ"):
         st.subheader("☀️ Ионосфера (Kp-Index)")
         if kp_df is not None:
             kp_val = float(kp_df.iloc[-1]['kp'])
-            # ЗОНА БЕЗОПАСНОСТИ
             if kp_val < 4:
                 st.success(f"Зона безопасности: Стабильно (Kp: {kp_val})")
             else:
                 st.error(f"ВНИМАНИЕ: Геомагнитная активность! (Kp: {kp_val})")
             st.line_chart(kp_df.tail(15).set_index('time')['kp'])
         else:
-            st.error("Данные ионосферы временно недоступны")
+            st.warning("Данные ионосферы временно недоступны")
