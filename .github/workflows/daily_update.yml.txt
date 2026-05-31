@@ -1,18 +1,29 @@
-name: Daily IonoSeis Update
+name: Daily Data Update
 on:
   schedule:
-    - cron: '0 0 * * *' # Запуск каждый день в полночь по UTC
-  workflow_dispatch:      # Позволяет нажать кнопку "Run workflow" в GitHub вручную
+    - cron: '0 8 * * *' # Запуск каждый день в 08:00 утра
+  workflow_dispatch: # Позволяет запустить вручную кнопкой на GitHub
+
 jobs:
-  update:
+  update-data:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v2
-        with: 
+        with:
           python-version: '3.9'
       - name: Install dependencies
-        run: pip install streamlit earthaccess matplotlib numpy
-      - name: Run Analysis
-        run: python main.py
+        run: pip install earthaccess xarray netCDF4
+      - name: Download NASA data
+        env:
+          EARTHDATA_USERNAME: ${{ secrets.EARTHDATA_USERNAME }}
+          EARTHDATA_PASSWORD: ${{ secrets.EARTHDATA_PASSWORD }}
+        run: python fetch_data.py
+      - name: Commit data
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add ./data/*
+          git commit -m "Auto-update NASA data"
+          git push
