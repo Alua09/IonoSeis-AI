@@ -3,79 +3,54 @@ import pandas as pd
 import requests
 import json
 import os
-from datetime import datetime
 
-# Настройка страницы
-st.set_page_config(layout="wide", page_title="IonoSeis Pro: Алматы")
-st.title("🛰 IonoSeis: Сейсмо-монитор (Центральная Азия)")
+st.set_page_config(layout="wide", page_title="IonoSeis: Алматы Pro")
+st.title("🛰 IonoSeis: Мониторинг сейсмики и ионосферы (Алматы)")
 
+# Константы
+ALMATY_LAT, ALMATY_LON = 43.25, 76.92
 CACHE_FILE = "data_cache.json"
 
 
-# Функция получения данных
-def get_seismic_data():
+def get_data():
     try:
-        # USGS API для мировых данных
-        url = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=100&minmagnitude=2"
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            with open(CACHE_FILE, 'w') as f:
-                json.dump(data, f)
-            return data
-    except:
-        pass
+        # Сейсмика
+        res_quake = requests.get("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=200", timeout=5)
+        # Солнечный поток (F10.7)
+        res_solar = requests.get("https://services.swpc.noaa.gov/json/solar_cycle/observed_flux_values.json", timeout=5)
 
-    # Резерв из кэша
-    if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, 'r') as f:
-            return json.load(f)
+        data = {'quakes': res_quake.json(), 'solar': res_solar.json()}
+        with open(CACHE_FILE, 'w') as f:
+            json.dump(data, f)
+        return data
+    except:
+        if os.path.exists(CACHE_FILE):
+            with open(CACHE_FILE, 'r') as f:
+                return json.load(f)
     return None
 
 
-# Основная логика
-if st.button("🚀 ЗАГРУЗИТЬ / ОБНОВИТЬ ДАННЫЕ"):
-    data = get_seismic_data()
-
+if st.button("🚀 ОБНОВИТЬ ДАННЫЕ ДЛЯ АЛМАТЫ"):
+    data = get_data()
     if data:
-        # Парсинг GeoJSON
-        features = data.get('features', [])
-        records = []
-        for f in features:
-            props = f['properties']
-            coords = f['geometry']['coordinates']
-            records.append({
-                'place': props['place'],
-                'mag': props['mag'],
-                'time': pd.to_datetime(props['time'], unit='ms'),
-                'lat': coords[1],
-                'lon': coords[0]
-            })
-
+        # 1. Сейсмика: фильтр для Алматы (300 км)
+        features = data['quakes'].get('features', [])
+        records = [{'place': f['properties']['place'], 'mag': f['properties']['mag'],
+                    'lat': f['geometry']['coordinates'][1], 'lon': f['geometry']['coordinates'][0]} for f in features]
         df = pd.DataFrame(records)
+        df['dist'] = ((df['lat'] - ALMATY_LAT) ** 2 + (df['lon'] - ALMATY_LON) ** 2) ** 0.5 * 111
+        local = df[df['dist'] < 300].sort_values(by='dist')
 
-        # Локальный фильтр для Алматы (радиус ~500 км)
-        # Координаты Алматы: 43.25, 76.92
-        almaty_lat, almaty_lon = 43.25, 76.92
-        df['dist'] = ((df['lat'] - almaty_lat) ** 2 + (df['lon'] - almaty_lon) ** 2) ** 0.5 * 111
-
-        # Разделение данных
-        local_quakes = df[df['dist'] < 800].sort_values(by='mag', ascending=False)
-
-        st.subheader("⚠️ События в регионе (Центральная Азия)")
-        if not local_quakes.empty:
-            st.dataframe(local_quakes[['place', 'mag', 'time', 'dist']], use_container_width=True)
+        st.subheader("⚠️ Сейсмические события (Радиус 300 км от Алматы)")
+        if not local.empty:
+            st.dataframe(local[['place', 'mag', 'dist']], use_container_width=True)
         else:
-            st.info("В радиусе 800 км от Алматы событий не зафиксировано.")
+            st.info("В радиусе 300 км от Алматы событий не зафиксировано.")
 
-        st.subheader("🌍 Глобальная статистика (Последние данные)")
-        st.metric("Всего событий в кэше", len(df))
-        st.metric("Max магнитуда в выборке", df['mag'].max())
-
-        # Визуализация
-        st.line_chart(df.set_index('time')['mag'])
+        # 2. Ионосфера: Солнечный поток (F10.7)
+        solar_df = pd.DataFrame(data['solar'][-20:])
+        st.subheader("☀️ Индекс ионосферного воздействия (F10.7 Flux)")
+        st.line_chart(solar_df.set_index('time-tag')['flux'])
 
     else:
-        st.error("Ошибка сети: серверы недоступны и кэш пуст.")
-
-st.sidebar.info("Монитор работает в автономном режиме с использованием локального кэша.")
+        st.error("Ошибка загрузки данных.")
