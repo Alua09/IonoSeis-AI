@@ -1,54 +1,54 @@
 import streamlit as st
-import numpy as np
-import matplotlib.pyplot as plt
 import earthaccess
 import os
+import requests
+import numpy as np
+import matplotlib.pyplot as plt
 from datetime import datetime
 
-# Настройка страницы
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Официальный мониторинг")
-st.title("🛰 IonoSeis AI: Реальные данные NASA")
+st.set_page_config(layout="wide", page_title="IonoSeis AI")
+st.title("🛰 IonoSeis AI: Мониторинг VTEC")
 
 
-# --- ФУНКЦИЯ АВТОРИЗАЦИИ И СКАЧИВАНИЯ ---
-def get_data_from_nasa():
-    # 1. Авторизация через официальную библиотеку (самый надежный способ)
-    auth = earthaccess.login(
-        username=st.secrets["EARTHDATA_USERNAME"],
-        password=st.secrets["EARTHDATA_PASSWORD"],
-        strategy="interactive"  # или "netrc"
+def setup_earthdata_auth():
+    """Создает файл .netrc для автоматической авторизации"""
+    netrc_content = (
+        f"machine urs.earthdata.nasa.gov\n"
+        f"login {st.secrets['EARTHDATA_USERNAME']}\n"
+        f"password {st.secrets['EARTHDATA_PASSWORD']}"
     )
+    # Записываем в домашнюю директорию
+    netrc_path = os.path.expanduser("~/.netrc")
+    with open(netrc_path, "w") as f:
+        f.write(netrc_content)
+    # Устанавливаем права доступа (важно для Linux/Cloud)
+    os.chmod(netrc_path, 0o600)
 
-    # 2. Поиск конкретного файла за сегодня
-    day_of_year = datetime.now().strftime("%j")
-    # Ищем коллекцию IGS IONEX
-    results = earthaccess.search_data(
-        short_name='GNSS_IGS_AC_ion_VTEC_comp',
-        temporal=(datetime.now(), datetime.now()),
-        count=1
-    )
-
-    if not results:
-        return None
-
-    # 3. Скачивание
-    files = earthaccess.download(results, "./tmp")
-    return files[0]
+    # Теперь логинимся без явной передачи аргументов
+    return earthaccess.login(strategy="netrc")
 
 
-# --- ИНТЕРФЕЙС ---
-# Кнопка будет активной по умолчанию
 if st.button("🚀 ЗАПУСК МОНИТОРИНГА"):
     try:
-        with st.spinner("Связь с сервером NASA..."):
-            file_path = get_data_from_nasa()
+        with st.spinner("Авторизация и поиск данных..."):
+            setup_earthdata_auth()
 
-            if file_path:
-                st.success("Данные успешно получены!")
-                # Чтение и визуализация (парсинг)
-                # ... тут код парсинга, который мы отладили ранее ...
-                st.write(f"Файл готов к обработке: {file_path}")
-            else:
-                st.error("Данные за сегодня еще не опубликованы в архиве NASA.")
+            # Поиск данных
+            results = earthaccess.search_data(
+                short_name='GNSS_IGS_AC_ion_VTEC_comp',
+                temporal=(datetime.now(), datetime.now()),
+                count=1
+            )
+
+            if not results:
+                st.error("Данные не найдены. Проверьте настройки коллекции.")
+                st.stop()
+
+            # Скачивание напрямую через библиотеку
+            files = earthaccess.download(results, "./tmp")
+
+            st.success(f"Файл скачан: {files[0]}")
+            st.write("Теперь вы можете использовать парсер для обработки этого файла.")
+
     except Exception as e:
-        st.error(f"Ошибка системы: {e}")
+        st.error(f"Ошибка: {e}")
