@@ -1,76 +1,80 @@
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
-import earthaccess
-import gzip
-import shutil
 import requests
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Global Monitor")
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Полная система")
+st.title("🛰 IonoSeis AI: Анализ ионосферы")
+
+# --- НАСТРОЙКИ ---
+USER = st.secrets.get("EARTHDATA_USERNAME", "")
+PASSWORD = st.secrets.get("EARTHDATA_PASSWORD", "")
 
 
-# --- 1. ФУНКЦИИ ДАННЫХ ---
-def get_earthquakes():
-    url = "https://earthquake.usgs.gov/fdsnws/event/1/query"
-    params = {"format": "geojson", "minmagnitude": 5.0, "limit": 20}
-    data = requests.get(url, params=params).json()
-    return [(f['geometry']['coordinates'][1], f['geometry']['coordinates'][0]) for f in data['features']]
+def fetch_ionex_data():
+    """Скачивает и возвращает путь к файлу"""
+    # Ссылка на архив NASA CDDIS (данные IGS)
+    date_path = datetime.now().strftime("%Y/%j")
+    filename = f"igsg{datetime.now().strftime('%j')}0.{datetime.now().strftime('%y')}i"
+    url = f"https://cddis.nasa.gov/archive/gnss/products/ionex/{date_path}/{filename}.Z"
+
+    response = requests.get(url, auth=(USER, PASSWORD), stream=True)
+    if response.status_code == 200:
+        path = "data.ionex"
+        with open(path, 'wb') as f:
+            f.write(response.content)
+        return path
+    return None
 
 
 def parse_ionex(file_path):
+    """Парсинг формата IONEX"""
     tec_values = []
-    with open(file_path, 'r') as f:
+    with open(file_path, 'r', errors='ignore') as f:
         in_block = False
         for line in f:
             if 'START OF TEC MAP' in line:
                 in_block = True
             elif 'END OF TEC MAP' in line:
                 in_block = False
-            elif in_block and 'LAT/LON1/LON2' not in line:
-                for p in line.split():
+            elif in_block and any(c.isdigit() for c in line):
+                parts = line.split()
+                for p in parts:
                     try:
                         val = float(p)
                         if val < 9000: tec_values.append(val)
                     except:
                         continue
-    return np.array(tec_values[:5183]).reshape((71, 73))
+    # Возвращаем массив 71x73
+    data = np.array(tec_values)
+    return data[:5183].reshape((71, 73))
 
 
-# --- 2. ИНТЕРФЕЙС ---
-st.title("🛰 IonoSeis AI: Глобальный мониторинг")
-if st.button("🚀 ОБНОВИТЬ КАРТУ (NASA + USGS)"):
-    with st.spinner("Загрузка данных..."):
-        # Скачивание NASA
-        results = earthaccess.search_data(short_name='GNSS_IGS_AC_ion_VTEC_comp', count=1)
-        session = earthaccess.login(persist=True).get_session()
-        response = session.get(results[0].data_links()[0], stream=True)
-        with open("data.ionex.gz", 'wb') as f: f.write(response.content)
-        with gzip.open("data.ionex.gz", 'rb') as f_in:
-            with open("data.ionex", 'wb') as f_out: shutil.copyfileobj(f_in, f_out)
+# --- ИНТЕРФЕЙС ---
+if st.button("🚀 ЗАПУСК ПОЛНОГО ЦИКЛА"):
+    try:
+        with st.spinner("Загрузка с серверов NASA..."):
+            file_path = fetch_ionex_data()
+            if not file_path:
+                st.error("Ошибка скачивания. Сервер NASA может быть недоступен.")
+                st.stop()
 
-        # Обработка
-        grid = parse_ionex("data.ionex")
-        final_grid = np.flipud(grid)
+            grid = parse_ionex(file_path)
 
-        # Визуализация
-        fig, ax = plt.subplots(figsize=(12, 6))
-        im = ax.imshow(final_grid, cmap='jet', interpolation='bicubic',
-                       extent=[-180, 180, -87.5, 87.5], aspect='auto')
-        plt.colorbar(im, label='VTEC')
+            # Визуализация
+            fig, ax = plt.subplots(figsize=(10, 5))
+            im = ax.imshow(np.flipud(grid.T), cmap='jet', interpolation='bicubic',
+                           aspect='auto', extent=[-180, 180, -87.5, 87.5])
 
-        # Наложение аномалий (VTEC > 40)
-        anomalies = np.argwhere(final_grid > 40)
-        # Преобразование индексов в координаты
-        lat_anom = 87.5 - (anomalies[:, 0] * (175 / 71))
-        lon_anom = -180 + (anomalies[:, 1] * (360 / 73))
-        ax.scatter(lon_anom, lat_anom, color='white', s=1, alpha=0.3, label='Высокий VTEC')
+            plt.colorbar(im, label='VTEC')
+            ax.set_title("Глобальная карта VTEC")
+            st.pyplot(fig)
 
-        # Землетрясения
-        quakes = get_earthquakes()
-        for lat, lon in quakes:
-            ax.scatter(lon, lat, color='red', marker='*', s=100, edgecolors='black', label='EQ (>5.0)')
+            # Статистика
+            st.write(f"Средний уровень VTEC: {np.mean(grid):.2f}")
+            st.success("Анализ завершен.")
 
-        ax.set_title("Глобальная ионосферная карта и сейсмические события")
-        st.pyplot(fig)
+    except Exception as e:
+        st.error(f"Критическая ошибка: {e}")
