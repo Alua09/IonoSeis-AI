@@ -1,39 +1,39 @@
 import streamlit as st
+import pandas as pd
 import requests
 
-st.title("🛰 IonoSeis: Мониторинг Алматы")
-ALMATY_LAT, ALMATY_LON = 43.25, 76.92
+st.set_page_config(page_title="IonoSeis AI Contest")
+st.title("🛰 IonoSeis: Мониторинг для конкурса")
 
-if st.button("🔄 ОБНОВИТЬ ДАННЫЕ"):
-    # Сейсмика: остается самым стабильным каналом
-    st.subheader("Сейсмическая активность (USGS)")
+
+# Используем надежный Proxy, который GitHub Actions "пропускает" без блокировок
+# Мы берем данные через сервис "allorigins", он превращает любой сложный API в простой текст
+def get_safe_data(url):
+    proxy_url = f"https://api.allorigins.win/get?url={requests.utils.quote(url)}"
+    response = requests.get(proxy_url, timeout=10)
+    return response.json()['contents']
+
+
+if st.button("🚀 ОБНОВИТЬ ДАННЫЕ (GITHUB READY)"):
     try:
-        r = requests.get("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=20", timeout=10)
-        data = r.json()
-        found = False
-        for f in data['features']:
-            lon, lat = f['geometry']['coordinates'][:2]
-            dist = ((lat - ALMATY_LAT) ** 2 + (lon - ALMATY_LON) ** 2) ** 0.5 * 111
-            if dist < 1000 and f['properties']['mag'] > 2.0:
-                st.write(
-                    f"🔹 {f['properties']['place']} | Магнитуда: {f['properties']['mag']} | Расстояние: {round(dist)} км")
-                found = True
-        if not found:
-            st.info("Сейсмически спокойно в радиусе 1000 км.")
-    except:
-        st.warning("Сервер сейсмики недоступен.")
+        # 1. Сейсмика через прокси
+        seis_url = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=csv&limit=5&minmagnitude=3"
+        csv_data = get_safe_data(seis_url)
+        from io import StringIO
 
-    # Геомагнитный фон: теперь через визуальный индикатор (без API)
-    st.subheader("Геомагнитная обстановка")
-    st.markdown("Следите за текущим статусом Kp-индекса на официальном портале:")
-    st.link_button("Открыть SpaceWeatherLive (Kp-индекс)",
-                   "https://www.spaceweatherlive.com/en/solar-activity/kp-index.html")
+        df = pd.read_csv(StringIO(csv_data))
 
-    st.info(
-        "💡 Совет: Если вы видите, что Kp-индекс выше 5 (красная зона), значит, ионосфера возмущена солнечной активностью.")
+        st.subheader("Сейсмические события")
+        st.write(df[['time', 'place', 'mag']])
 
-st.sidebar.markdown("""
-### Ваша система готова.
-Сейчас приложение работает как «окно» в данные. 
-Если вы хотите собирать статистику (лог), напишите мне, и мы добавим функцию сохранения всех землетрясений в текстовый файл прямо на вашем компьютере.
-""")
+        # 2. Kp-индекс через прокси
+        kp_url = "https://kp.gfz-potsdam.de/app/files/Kp_ap_Ap_SN_F10.7_nowcast.txt"
+        kp_text = get_safe_data(kp_url)
+        last_val = [line for line in kp_text.splitlines() if not line.startswith('#')][-1].split()[2]
+
+        st.metric("Kp-индекс (GFZ)", last_val)
+        st.success("Данные успешно получены через GitHub Proxy!")
+
+    except Exception as e:
+        st.error(f"Ошибка загрузки: {e}")
+        st.write("Если вы видите это в GitHub Actions, проверьте наличие библиотеки pandas в requirements.txt")
