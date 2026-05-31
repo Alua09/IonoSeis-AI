@@ -6,7 +6,7 @@ import subprocess, os, re, requests
 from datetime import datetime, timedelta
 
 st.set_page_config(layout="wide", page_title="IonoSeis AI")
-st.title("🛰 IonoSeis AI: Анализ")
+st.title("🛰 IonoSeis: Анализ ионосферы")
 
 
 def parse_ionex_robust(file_path):
@@ -27,7 +27,7 @@ def parse_ionex_robust(file_path):
 
 if st.button("🚀 ЗАПУСК МОНИТОРИНГА"):
     try:
-        # Безопасный запрос данных
+        # Получение КП-индекса с защитой
         try:
             r = requests.get("https://services.swpc.noaa.gov/products/noaa-k-index.json", timeout=5)
             kp = [float(x[1]) for x in r.json()[1:][-20:]] if r.status_code == 200 else [0] * 20
@@ -35,7 +35,10 @@ if st.button("🚀 ЗАПУСК МОНИТОРИНГА"):
             kp = [0] * 20
 
         earthaccess.login(strategy="netrc")
-        results = earthaccess.search_data(short_name='GNSS_IGS_AC_ion_VTEC_comp', count=7)
+        # Попытка поиска в двух коллекциях
+        results = earthaccess.search_data(short_name='GIM_IONEX_VTEC', count=5) or \
+                  earthaccess.search_data(short_name='GNSS_IGS_AC_ion_VTEC_comp', count=5)
+
         paths = earthaccess.download(results, ".")
 
         a, t = [], []
@@ -56,6 +59,6 @@ if st.button("🚀 ЗАПУСК МОНИТОРИНГА"):
         ax3.set_title("КП-индекс")
         for ax in [ax1, ax2, ax3]: ax.grid(True)
         st.pyplot(fig)
-        st.success("Готово!")
+        st.success("Анализ завершен!")
     except Exception as e:
         st.error(f"Ошибка: {e}")
