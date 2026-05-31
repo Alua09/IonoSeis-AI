@@ -2,14 +2,11 @@ import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 import requests
-import patoolib
 import os
 from datetime import datetime
 
-st.set_page_config(layout="wide")
-st.title("🛰 IonoSeis AI: Полная обработка данных")
+st.set_page_config(layout="wide", page_title="IonoSeis AI")
 
-# Данные авторизации
 USER = st.secrets["EARTHDATA_USERNAME"]
 PASSWORD = st.secrets["EARTHDATA_PASSWORD"]
 
@@ -24,14 +21,15 @@ def process_data():
     with open("data.Z", "wb") as f:
         f.write(response.content)
 
-    # 2. Распаковка
-    patoolib.extract_archive("data.Z", outdir=".", verbosity=-1)
-    # После распаковки файл будет называться igsg...i
+    # 2. Распаковка через системную утилиту (в linux/cloud это надежнее всего)
+    # Если команда uncompress отсутствует, файл может быть прочитан как текстовый
+    os.system("uncompress -f data.Z")
     extracted_file = f"igsg{day}0.{year}i"
 
     # 3. Парсинг
     tec_values = []
-    with open(extracted_file, 'r', errors='ignore') as f:
+    # Используем 'latin-1', чтобы избежать проблем с кодировкой
+    with open(extracted_file, 'r', encoding='latin-1', errors='ignore') as f:
         in_block = False
         for line in f:
             if 'START OF TEC MAP' in line:
@@ -45,7 +43,13 @@ def process_data():
                         if val < 9000: tec_values.append(val)
                     except:
                         continue
-    return np.array(tec_values).reshape((71, 73))
+
+    # Возвращаем массив.
+    # ВАЖНО: убедитесь, что размер данных совпадает с ожидаемым (71x73)
+    data = np.array(tec_values)
+    if len(data) < 5183:
+        st.warning(f"Считано только {len(data)} точек. Данные могут быть неполными.")
+    return data[:5183].reshape((71, 73))
 
 
 if st.button("🚀 ПОСТРОИТЬ КАРТУ"):
@@ -53,13 +57,12 @@ if st.button("🚀 ПОСТРОИТЬ КАРТУ"):
         grid = process_data()
 
         fig, ax = plt.subplots(figsize=(10, 5))
+        # Отражаем и транспонируем для корректного отображения широты/долготы
         im = ax.imshow(np.flipud(grid.T), cmap='jet', interpolation='bicubic',
                        extent=[-180, 180, -87.5, 87.5], aspect='auto')
 
         plt.colorbar(im, label='VTEC')
-        ax.set_title("Актуальная карта VTEC")
+        ax.set_title("Актуальная карта VTEC (NASA)")
         st.pyplot(fig)
-
-        st.success("Данные успешно обработаны.")
     except Exception as e:
         st.error(f"Ошибка при парсинге: {e}")
