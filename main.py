@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 # Настройка страницы
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Алматы")
-st.title("🛰 IonoSeis AI: Глубокий анализ ионосферы")
+st.title("🛰 IonoSeis AI: Анализ ионосферы и сейсмоактивности")
 
 ALMATY_LAT, ALMATY_LON = 43.25, 76.92
 
@@ -23,7 +23,6 @@ def setup_auth():
 
 
 def parse_upc_ionex(file_path):
-    # Распаковка и парсинг
     with gzip.open(file_path, 'rb') as f_in:
         with open("data.ionex", 'wb') as f_out: shutil.copyfileobj(f_in, f_out)
 
@@ -55,8 +54,9 @@ def get_almaty_tec(grid):
 # --- ИНТЕРФЕЙС ---
 if st.button("🚀 ЗАПУСТИТЬ АНАЛИЗ (NASA + USGS)"):
     try:
-        with st.spinner("Связь с серверами NASA..."):
+        with st.spinner("Синхронизация с серверами..."):
             setup_auth()
+            # 1. Ионосфера
             results = earthaccess.search_data(
                 short_name='GNSS_IGS_AC_ion_VTEC_comp',
                 temporal=(datetime.now() - timedelta(days=5), datetime.now()),
@@ -68,25 +68,31 @@ if st.button("🚀 ЗАПУСТИТЬ АНАЛИЗ (NASA + USGS)"):
                 if files:
                     grid = parse_upc_ionex(files[0])
                     val = get_almaty_tec(grid)
-
                     st.metric("Плотность ионосферы над Алматы (VTEC)", f"{val:.2f} TECU")
 
-                    # USGS Сейсмика
-                    quakes = requests.get(
-                        "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=10").json()
-                    st.subheader("Последние сейсмические события")
-                    for f in quakes['features'][:5]:
-                        st.write(f"- {f['properties']['place']} | Магнитуда: {f['properties']['mag']}")
+                # 2. Сейсмика (Фильтр Алматы 1000 км)
+                st.subheader("Сейсмическая активность (фокус: Алматы, 1000 км)")
+                quakes = requests.get(
+                    "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=100").json()
 
-                    st.success("Данные успешно обновлены.")
+                local_quakes = []
+                for f in quakes['features']:
+                    lon, lat = f['geometry']['coordinates'][:2]
+                    dist = ((lat - ALMATY_LAT) ** 2 + (lon - ALMATY_LON) ** 2) ** 0.5 * 111
+                    if dist < 1000:
+                        local_quakes.append(
+                            {'place': f['properties']['place'], 'mag': f['properties']['mag'], 'dist': round(dist)})
+
+                if local_quakes:
+                    for q in local_quakes:
+                        if q['dist'] < 500 or q['mag'] > 4.0:
+                            st.error(f"⚠️ {q['place']} | Магнитуда: {q['mag']} | Расстояние: {q['dist']} км")
+                        else:
+                            st.write(f"🔹 {q['place']} | Магнитуда: {q['mag']} | Расстояние: {q['dist']} км")
                 else:
-                    st.error("Ошибка при скачивании файла данных.")
+                    st.info("В радиусе 1000 км значимых событий нет.")
             else:
                 st.warning("Нет новых данных от NASA за последние 5 дней.")
 
     except Exception as e:
         st.error(f"Ошибка процесса: {e}")
-
-st.sidebar.markdown("---")
-st.sidebar.write("### Статус: Подключен")
-st.sidebar.write("Регион мониторинга: Алматы")
