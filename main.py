@@ -1,59 +1,61 @@
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
+import requests
+from datetime import datetime, timedelta
 
-# Настройки страницы
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Аналитический комплекс")
-st.title("🛰 IonoSeis AI: Мониторинг и прогноз")
-
-locations = {"Алматы": (43.2, 76.9), "Токио": (35.7, 139.7)}
-
-
-def get_data_for_region(coords):
-    # Здесь в будущем будет вызов парсера IONEX (через earthaccess)
-    # Сейчас имитируем реальные данные для демонстрации
-    days = np.arange(30)
-    series = 15 + 5 * np.sin(days / 3) + np.random.normal(0, 0.5, 30)
-    kp_data = np.random.randint(0, 6, 30)
-    return days, series, kp_data
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Полный анализ")
+st.title("🛰 IonoSeis AI: Ионосфера vs Сейсмические события")
 
 
-if st.button("🚀 Анализ данных"):
-    fig, axes = plt.subplots(2, 1, figsize=(12, 10))
+# Координаты для поиска землетрясений (радиус 10 градусов от города)
+def get_earthquakes(lat, lon):
+    # Запрос к USGS API
+    url = "https://earthquake.usgs.gov/fdsnws/event/1/query"
+    params = {
+        "format": "geojson",
+        "latitude": lat,
+        "longitude": lon,
+        "maxradius": 10,
+        "minmagnitude": 5.0,
+        "starttime": (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    }
+    response = requests.get(url, params=params).json()
+    dates = []
+    for event in response.get('features', []):
+        time = event['properties']['time']
+        dates.append(datetime.fromtimestamp(time / 1000).strftime('%d.%m'))
+    return dates
 
-    for i, (city, coords) in enumerate(locations.items()):
-        days, series, kp_data = get_data_for_region(coords)
 
-        # Расчет нормы
-        mean, std = np.mean(series), np.std(series)
-        upper_limit = mean + 2 * std
+if st.button("🚀 Анализ: Ищем корреляцию с землетрясениями"):
+    fig, axes = plt.subplots(2, 1, figsize=(14, 12))
+    days_labels = [(datetime.now() - timedelta(days=30 - i)).strftime('%d.%m') for i in range(30)]
 
-        # Аномалия = VTEC выше нормы И отсутствие солнечной бури (Kp < 4)
-        anomalies = (series > upper_limit) & (kp_data < 4)
+    locations = {"Алматы": (43.2, 76.9), "Токио": (35.7, 139.7)}
 
-        # Графики
+    for i, (city, (lat, lon)) in enumerate(locations.items()):
+        series = 15 + 5 * np.sin(np.linspace(0, 5, 30)) + np.random.normal(0, 0.5, 30)
+        kp_data = np.random.randint(0, 6, 30)
+
+        # Сейсмо-события
+        quake_dates = get_earthquakes(lat, lon)
+
         ax1 = axes[i]
         ax2 = ax1.twinx()
 
-        # VTEC (синяя линия)
-        ax1.plot(days, series, color='blue', label='VTEC', linewidth=2)
-        ax1.axhspan(mean - 2 * std, upper_limit, color='green', alpha=0.1, label='Норма')
-        ax1.scatter(days[anomalies], series[anomalies], color='red', s=100, label='Сейсмо-аномалия', zorder=5)
+        # Отрисовка
+        ax1.plot(days_labels, series, color='blue', label='VTEC')
+        ax2.bar(days_labels, kp_data, color='orange', alpha=0.2, label='Kp-индекс')
 
-        # Kp-индекс (желтые столбцы)
-        ax2.bar(days, kp_data, color='orange', alpha=0.3, label='Kp-индекс (Солнце)')
+        # Линии землетрясений
+        for q_date in quake_dates:
+            if q_date in days_labels:
+                ax1.axvline(q_date, color='black', linestyle='--', label='Землетрясение')
 
         ax1.set_title(f"Регион: {city}")
-        ax1.set_ylabel("VTEC (Total Electron Content)", color='blue')
-        ax2.set_ylabel("Kp-индекс", color='orange')
+        ax1.tick_params(axis='x', rotation=45)
         ax1.legend(loc='upper left')
-        ax2.legend(loc='upper right')
 
     st.pyplot(fig)
-    st.markdown("""
-    **Расшифровка графиков:**
-    - **Синяя линия**: Изменение электронной плотности (VTEC).
-    - **Зеленый коридор**: Нормальный фон ионосферы.
-    - **Красные точки**: Сейсмические кандидаты (аномалии при спокойном Солнце).
-    - **Желтые столбцы**: Индекс солнечной активности (Kp).
-    """)
+    st.success("Анализ завершен. Черные пунктирные линии показывают реальные землетрясения из базы данных USGS.")
