@@ -8,4 +8,3 @@ netCDF4
 earthaccess
 h5netcdf
 matplotlib
-beautifulsoup4
