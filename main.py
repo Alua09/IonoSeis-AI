@@ -1,48 +1,51 @@
 import streamlit as st
 import numpy as np
-import gzip
-import shutil
 import matplotlib.pyplot as plt
 import re
 
 st.set_page_config(page_title="IonoSeis AI", layout="wide")
-st.title("🛰 IonoSeis AI: Парсер IONEX")
+st.title("🛰 IonoSeis AI: Итоговая карта VTEC")
 
-if st.button("🚀 Обработать и визуализировать"):
+if st.button("🚀 Построить корректную карту"):
     try:
         final_path = "data.ionex"
-
-        # Читаем файл целиком
         with open(final_path, 'r', encoding='ascii', errors='ignore') as f:
             content = f.read()
 
-        # Ищем блок данных TEC между заголовками
-        # Используем regex для поиска всех чисел в блоках TEC MAP
-        # Обычно сетка имеет размер 73 долготы x 71 широту
-
-        # Находим первый попавшийся блок данных
+        # Ищем блок данных TEC
         match = re.search(r"START OF TEC MAP(.*?)END OF TEC MAP", content, re.DOTALL)
 
         if match:
             block = match.group(1)
-            # Извлекаем все числа из блока
+            # Извлекаем все числа (включая отрицательные)
             numbers = re.findall(r"[-+]?\d*\.\d+|\d+", block)
             data = np.array([float(n) for n in numbers])
 
-            # В IONEX сетка обычно 71 по широте, 73 по долготе (как указано в заголовке)
-            # 71 * 73 = 5183 точки
-            if len(data) >= 5183:
-                grid = data[:5183].reshape((71, 73))
+            # 1. Фильтруем "9999" и другие аномальные значения
+            data[data >= 9000] = np.nan
 
-                fig, ax = plt.subplots(figsize=(8, 6))
-                im = ax.imshow(grid, cmap='viridis', origin='lower')
-                plt.colorbar(im, label='TEC (0.1 TECU)')
+            # 2. Формируем сетку (71 широта, 73 долгота)
+            # Если карта все еще «полосатая», мы делаем транспонирование .T
+            if len(data) >= 5183:
+                grid = data[:5183].reshape((71, 73)).T
+
+                fig, ax = plt.subplots(figsize=(10, 5))
+
+                # Используем origin='lower' для правильной ориентации по широте
+                im = ax.imshow(grid, cmap='plasma', origin='lower', aspect='auto',
+                               extent=[-180, 180, -87.5, 87.5])
+
+                plt.colorbar(im, label='VTEC (0.1 TECU)')
+                ax.set_xlabel("Долгота")
+                ax.set_ylabel("Широта")
+                ax.set_title("Глобальная карта ионосферы (GIM)")
+
                 st.pyplot(fig)
-                st.success("Карта VTEC успешно построена!")
+                st.success("Карта успешно построена!")
             else:
-                st.error(f"Данных найдено: {len(data)}, а нужно 5183. Проверьте размерность.")
+                st.error("Недостаточно данных для построения сетки.")
         else:
-            st.error("Не удалось найти блоки 'START OF TEC MAP'. Возможно, файл специфический.")
+            st.error("Не удалось найти блок данных TEC.")
 
     except Exception as e:
-        st.error(f"Ошибка парсинга: {e}")
+        st.error(f"Ошибка: {e}")
