@@ -1,57 +1,42 @@
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
-import re
 
-st.set_page_config(layout="wide")
-st.title("🛰 IonoSeis AI: Анализ временного ряда (Змейка)")
+st.set_page_config(layout="wide", page_title="IonoSeis AI")
+st.title("🛰 IonoSeis AI: Сравнительный анализ аномалий")
 
-# Укажите координаты точки интереса (например, Алматы)
-lat_target, lon_target = 43.2, 76.9
+# Настройки городов
+locations = {
+    "Алматы": (43.2, 76.9),
+    "Токио": (35.7, 139.7)
+}
 
-if st.button("🚀 Построить гармонический график"):
-    try:
-        # 1. Мы читаем данные из нескольких файлов (имитация серии)
-        # В реальной работе здесь будет цикл по списку файлов IONEX
-        raw_data = []
-        # Допустим, мы извлекли значения TEC для конкретной точки из 30 дней:
-        # Генерируем "гармонику" с шумом
+if st.button("📊 Сравнить Алматы и Токио"):
+    fig, axes = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
+
+    # Генерируем данные для обоих городов (в реальности подставьте сюда чтение IONEX)
+    for i, (city, coords) in enumerate(locations.items()):
         days = np.arange(30)
-        base = 15 + 5 * np.sin(days / 3)  # "Змейка"
-        noise = np.random.normal(0, 1, 30)
-        series = base + noise
+        # Симулируем данные (в реальности здесь будет парсинг конкретной точки из IONEX)
+        series = 15 + 5 * np.sin(days / 3) + np.random.normal(0, 1, 30)
 
-        # Вносим аномалии
-        series[5] += 8
-        series[20] -= 7
+        # Добавляем искусственную аномалию для примера
+        if city == "Алматы":
+            series[5] += 10
+        else:
+            series[22] += 12
 
-        # 2. Расчет границ нормы (Moving Average или Mean +/- 2*Std)
-        mean = np.mean(series)
-        std = np.std(series)
+        mean, std = np.mean(series), np.std(series)
         upper = mean + 2 * std
-        lower = mean - 2 * std
 
-        # 3. Визуализация
-        fig, ax = plt.subplots(figsize=(12, 5))
+        # График
+        axes[i].plot(series, label=f'VTEC {city}', color='blue')
+        axes[i].axhspan(mean - 2 * std, upper, color='green', alpha=0.2)
+        axes[i].scatter(np.where(series > upper)[0], series[series > upper], color='red', s=100)
+        axes[i].set_title(f"Мониторинг ионосферы: {city} {coords}")
+        axes[i].set_ylabel("VTEC")
+        axes[i].legend()
 
-        # Рисуем "Змейку"
-        ax.plot(series, color='blue', label='VTEC (TEC units)', linewidth=2)
-
-        # Рисуем "Зеленую зону"
-        ax.axhspan(lower, upper, color='green', alpha=0.2, label='Безопасная зона')
-
-        # Рисуем "Красные точки" (аномалии)
-        anomalies = (series > upper) | (series < lower)
-        ax.scatter(np.where(anomalies)[0], series[anomalies], color='red', s=100, label='Аномалия', zorder=5)
-
-        ax.set_title(f"Ионосферный мониторинг (Координаты: {lat_target}, {lon_target})")
-        ax.set_xlabel("Дни")
-        ax.set_ylabel("VTEC")
-        ax.legend()
-        ax.grid(True, linestyle='--', alpha=0.6)
-
-        st.pyplot(fig)
-        st.success("График готов!")
-
-    except Exception as e:
-        st.error(f"Ошибка: {e}")
+    plt.xlabel("Дни мая 2026")
+    st.pyplot(fig)
+    st.success("Сравнительный анализ готов!")
