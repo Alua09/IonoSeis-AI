@@ -1,23 +1,54 @@
 import streamlit as st
-import requests
+import numpy as np
+import matplotlib.pyplot as plt
+import earthaccess
+import os
+from datetime import datetime
+
+# Настройка страницы
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Официальный мониторинг")
+st.title("🛰 IonoSeis AI: Реальные данные NASA")
 
 
-def fetch_ionex_data():
-    day = "151"  # Например, 151
-    year = "26"
-    url = f"https://cddis.nasa.gov/archive/gnss/products/ionex/2026/{day}/igsg{day}0.{year}i.Z"
+# --- ФУНКЦИЯ АВТОРИЗАЦИИ И СКАЧИВАНИЯ ---
+def get_data_from_nasa():
+    # 1. Авторизация через официальную библиотеку (самый надежный способ)
+    auth = earthaccess.login(
+        username=st.secrets["EARTHDATA_USERNAME"],
+        password=st.secrets["EARTHDATA_PASSWORD"],
+        strategy="interactive"  # или "netrc"
+    )
 
-    # Ключевой момент: используем Session для сохранения куки авторизации
-    session = requests.Session()
-    session.auth = (st.secrets["EARTHDATA_USERNAME"], st.secrets["EARTHDATA_PASSWORD"])
+    # 2. Поиск конкретного файла за сегодня
+    day_of_year = datetime.now().strftime("%j")
+    # Ищем коллекцию IGS IONEX
+    results = earthaccess.search_data(
+        short_name='GNSS_IGS_AC_ion_VTEC_comp',
+        temporal=(datetime.now(), datetime.now()),
+        count=1
+    )
 
-    # Сначала заходим на сервер авторизации, а потом скачиваем файл
-    response = session.get(url, stream=True)
+    if not results:
+        return None
 
-    # Проверка, не попали ли мы снова на страницу логина
-    if "Earthdata Login" in response.text[:500]:
-        return None, "Ошибка: Авторизация не прошла, сервер вернул страницу логина."
+    # 3. Скачивание
+    files = earthaccess.download(results, "./tmp")
+    return files[0]
 
-    return response.content, "Успех!"
 
-# Используйте этот код в своей кнопке
+# --- ИНТЕРФЕЙС ---
+# Кнопка будет активной по умолчанию
+if st.button("🚀 ЗАПУСК МОНИТОРИНГА"):
+    try:
+        with st.spinner("Связь с сервером NASA..."):
+            file_path = get_data_from_nasa()
+
+            if file_path:
+                st.success("Данные успешно получены!")
+                # Чтение и визуализация (парсинг)
+                # ... тут код парсинга, который мы отладили ранее ...
+                st.write(f"Файл готов к обработке: {file_path}")
+            else:
+                st.error("Данные за сегодня еще не опубликованы в архиве NASA.")
+    except Exception as e:
+        st.error(f"Ошибка системы: {e}")
