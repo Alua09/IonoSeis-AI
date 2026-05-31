@@ -1,89 +1,76 @@
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
-import requests
 import earthaccess
+import gzip
+import shutil
+import requests
 import os
-import xarray as xr
 from datetime import datetime, timedelta
 
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Анализ")
-st.title("🛰 IonoSeis AI: Мониторинг ионосферы")
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Global Monitor")
 
 
-# --- АВТОРИЗАЦИЯ ---
-def authenticate():
-    user = st.secrets.get("EARTHDATA_USERNAME") or os.getenv('EARTHDATA_USERNAME')
-    pwd = st.secrets.get("EARTHDATA_PASSWORD") or os.getenv('EARTHDATA_PASSWORD')
-
-    netrc_path = os.path.expanduser("~/.netrc")
-    with open(netrc_path, "w") as f:
-        f.write(f"machine urs.earthdata.nasa.gov login {user} password {pwd}")
-
-    earthaccess.login(strategy="netrc")
+# --- 1. ФУНКЦИИ ДАННЫХ ---
+def get_earthquakes():
+    url = "https://earthquake.usgs.gov/fdsnws/event/1/query"
+    params = {"format": "geojson", "minmagnitude": 5.0, "limit": 20}
+    data = requests.get(url, params=params).json()
+    return [(f['geometry']['coordinates'][1], f['geometry']['coordinates'][0]) for f in data['features']]
 
 
-# --- ПОИСК И СКАЧИВАНИЕ ---
-def get_latest_data(lat, lon):
-    # Пытаемся взять данные из коллекции IGS_GIM напрямую
-    query = earthaccess.search_data(
-        short_name='IGS_GIM',
-        temporal=(datetime.now() - timedelta(days=30), datetime.now())
-    )
-
-    if not query:
-        raise Exception("NASA вернула пустой список для IGS_GIM")
-
-    # Скачиваем файл
-    files = earthaccess.download(query[-1], "./tmp")
-    ds = xr.open_dataset(files[0])
-
-    # ПРИНУДИТЕЛЬНЫЙ ВЫБОР: выводим список того, что внутри файла, если ошибка
-    # Это поможет нам понять, как называются данные
-    try:
-        # Ищем переменную по ключевым словам
-        possible_vars = ['TEC', 'tec', 'ion', 'vtec']
-        found_var = next((v for v in ds.data_vars if v in possible_vars), list(ds.data_vars)[0])
-
-        # Берем данные
-        return ds[found_var].sel(lat=lat, lon=lon, method='nearest').values.flatten()
-    except Exception as e:
-        st.write(f"Структура файла: {list(ds.data_vars)}")  # ДЕБАГ: выведет названия переменных на экран
-        raise e
+def parse_ionex(file_path):
+    tec_values = []
+    with open(file_path, 'r') as f:
+        in_block = False
+        for line in f:
+            if 'START OF TEC MAP' in line:
+                in_block = True
+            elif 'END OF TEC MAP' in line:
+                in_block = False
+            elif in_block and 'LAT/LON1/LON2' not in line:
+                for p in line.split():
+                    try:
+                        val = float(p)
+                        if val < 9000: tec_values.append(val)
+                    except:
+                        continue
+    return np.array(tec_values[:5183]).reshape((71, 73))
 
 
-# --- ИНТЕРФЕЙС ---
-if st.button("🚀 ЗАГРУЗИТЬ И АНАЛИЗИРОВАТЬ"):
-    try:
-        with st.spinner("Связь с сервером NASA..."):
-            authenticate()
-            st.write("✅ Авторизация успешна. Выполняется анализ...")
+# --- 2. ИНТЕРФЕЙС ---
+st.title("🛰 IonoSeis AI: Глобальный мониторинг")
+if st.button("🚀 ОБНОВИТЬ КАРТУ (NASA + USGS)"):
+    with st.spinner("Загрузка данных..."):
+        # Скачивание NASA
+        results = earthaccess.search_data(short_name='GNSS_IGS_AC_ion_VTEC_comp', count=1)
+        session = earthaccess.login(persist=True).get_session()
+        response = session.get(results[0].data_links()[0], stream=True)
+        with open("data.ionex.gz", 'wb') as f: f.write(response.content)
+        with gzip.open("data.ionex.gz", 'rb') as f_in:
+            with open("data.ionex", 'wb') as f_out: shutil.copyfileobj(f_in, f_out)
 
-            locations = {"Алматы": (43.2, 76.9), "Токио": (35.7, 139.7)}
-            fig, axes = plt.subplots(2, 1, figsize=(14, 12))
-            dates = [(datetime.now() - timedelta(days=30 - i)).strftime('%d.%m') for i in range(30)]
+        # Обработка
+        grid = parse_ionex("data.ionex")
+        final_grid = np.flipud(grid)
 
-            for i, (city, (lat, lon)) in enumerate(locations.items()):
-                try:
-                    series = get_latest_data(lat, lon)[:30]
-                except:
-                    st.warning(f"Данные для {city} не найдены. Работаем в режиме симуляции.")
-                    series = 15 + 5 * np.sin(np.linspace(0, 5, 30)) + np.random.normal(0, 0.5, 30)
+        # Визуализация
+        fig, ax = plt.subplots(figsize=(12, 6))
+        im = ax.imshow(final_grid, cmap='jet', interpolation='bicubic',
+                       extent=[-180, 180, -87.5, 87.5], aspect='auto')
+        plt.colorbar(im, label='VTEC')
 
-                kp_data = np.random.randint(0, 6, 30)
-                mean, std = np.mean(series), np.std(series)
-                anomalies = (series > mean + 2 * std) & (kp_data < 4)
+        # Наложение аномалий (VTEC > 40)
+        anomalies = np.argwhere(final_grid > 40)
+        # Преобразование индексов в координаты
+        lat_anom = 87.5 - (anomalies[:, 0] * (175 / 71))
+        lon_anom = -180 + (anomalies[:, 1] * (360 / 73))
+        ax.scatter(lon_anom, lat_anom, color='white', s=1, alpha=0.3, label='Высокий VTEC')
 
-                ax1 = axes[i]
-                ax2 = ax1.twinx()
-                ax1.plot(dates, series, label='VTEC', color='blue')
-                ax1.scatter(np.array(dates)[anomalies], series[anomalies], color='red', s=100, label='Аномалия')
-                ax2.bar(dates, kp_data, color='orange', alpha=0.2, label='Kp-индекс')
-                ax1.set_title(f"Регион: {city}")
-                ax1.legend();
-                ax2.legend()
+        # Землетрясения
+        quakes = get_earthquakes()
+        for lat, lon in quakes:
+            ax.scatter(lon, lat, color='red', marker='*', s=100, edgecolors='black', label='EQ (>5.0)')
 
-            st.pyplot(fig)
-            st.success("Мониторинг обновлен.")
-    except Exception as e:
-        st.error(f"Критическая ошибка: {e}")
+        ax.set_title("Глобальная ионосферная карта и сейсмические события")
+        st.pyplot(fig)
