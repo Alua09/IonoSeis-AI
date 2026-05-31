@@ -5,12 +5,10 @@ import requests
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
-# Настройка страницы
 st.set_page_config(layout="wide", page_title="IonoSeis AI")
-st.title("🛰 IonoSeis: Стабильный мониторинг ионосферы")
+st.title("🛰 IonoSeis: Стабильный мониторинг")
 
 
-# 1. Функция получения землетрясений
 def get_earthquakes(lat, lon):
     url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={lat}&longitude={lon}&maxradius=10&minmagnitude=4"
     try:
@@ -20,11 +18,11 @@ def get_earthquakes(lat, lon):
             quakes = []
             for f in data.get('features', []):
                 time_val = f['properties'].get('time')
-                mag_val = f['properties'].get('mag')
-                if time_val and mag_val is not None:
+                mag_val = f['properties'].get('mag', 0)
+                if time_val:
                     quakes.append({
                         'time': pd.to_datetime(time_val, unit='ms'),
-                        'mag': float(mag_val)
+                        'mag': mag_val
                     })
             return pd.DataFrame(quakes)
         return pd.DataFrame()
@@ -32,51 +30,35 @@ def get_earthquakes(lat, lon):
         return pd.DataFrame()
 
 
-# 2. Функция получения данных VTEC
-def get_vtec_data():
-    dates = pd.date_range(end=datetime.now(), periods=30, freq='D')
-    return pd.DataFrame({'date': dates, 'vtec': np.random.uniform(15, 35, 30)})
-
-
-# 3. Основная логика
 if st.button("🚀 ОБНОВИТЬ ДАННЫЕ"):
     try:
-        df = get_vtec_data()
-        quakes = get_earthquakes(43.2, 76.9)  # Алматы
+        # Данные VTEC
+        dates = pd.date_range(end=datetime.now(), periods=30, freq='D')
+        df = pd.DataFrame({'date': dates, 'vtec': np.random.uniform(15, 35, 30)})
+
+        # Данные землетрясений
+        quakes = get_earthquakes(43.2, 76.9)
 
         fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df['date'], y=df['vtec'], name='VTEC', line=dict(color='#00FF00')))
 
-        # Линия VTEC
-        fig.add_trace(go.Scatter(
-            x=df['date'],
-            y=df['vtec'],
-            name='VTEC Уровень',
-            line=dict(color='#00FF00', width=2)
-        ))
-
-        # Красные линии землетрясений
+        # РАБОТАЕМ С ЛИНИЯМИ БЕЗ ОПЕРАЦИЙ +
         if not quakes.empty:
             for _, q in quakes.iterrows():
-                # Конвертация в строки заранее
-                date_str = q['time'].strftime('%Y-%m-%d %H:%M:%S')
-                label = "M" + str(round(q['mag'], 1))
+                # Используем форматирование f-строками (самый надежный метод)
+                time_str = q['time'].strftime('%Y-%m-%d %H:%M:%S')
+                mag_label = f"M{q['mag']:.1f}"
 
                 fig.add_vline(
-                    x=date_str,
+                    x=time_str,
                     line_dash="dash",
                     line_color="red",
-                    annotation_text=label,
-                    annotation_position="top"
+                    annotation_text=mag_label
                 )
 
-        fig.update_layout(
-            title="Динамика ионосферы и сейсмические события",
-            template="plotly_dark",
-            xaxis_title="Дата",
-            yaxis_title="VTEC Units"
-        )
+        fig.update_layout(template="plotly_dark", title="Мониторинг")
         st.plotly_chart(fig, use_container_width=True)
-        st.success("Данные успешно обновлены!")
-
+        st.success("Готово!")
     except Exception as e:
-        st.error(f"Ошибка при построении графика: {e}")
+        # ВЫВОДИМ ТИП ОШИБКИ ДЛЯ ДИАГНОСТИКИ
+        st.error(f"Тип ошибки: {type(e).__name__}. Сообщение: {e}")
