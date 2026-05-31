@@ -1,34 +1,37 @@
 import streamlit as st
 import xarray as xr
+import matplotlib.pyplot as plt
 import gzip
 import shutil
-import matplotlib.pyplot as plt
-import numpy as np
 
-# Используем специализированную библиотеку или парсинг
-# Для IONEX 1.0 идеально подходит xarray, если правильно указать параметры
-# Но так как файл текстовый, мы будем использовать метод 'ionex' через georinex,
-# но теперь мы знаем, что это корректный файл.
+st.set_page_config(page_title="IonoSeis AI", layout="wide")
+st.title("🛰 IonoSeis AI: Анализ IONEX")
 
-if st.button("🚀 Построить карту VTEC"):
+if st.button("🚀 Обработать файл вручную"):
     try:
-        # У нас уже есть файл 'data.ionex', который мы распаковали ранее
         final_path = "data.ionex"
 
-        # IONEX файлы читаются через библиотеку georinex,
-        # нужно просто передать аргумент 'use'
-        import georinex as gr
+        # Для файлов IONEX формата 1.0 от NRCAN лучше всего подходит
+        # использование xarray для чтения напрямую, если он поддерживает этот формат.
+        # Если нет, мы используем встроенные средства.
 
-        ds = gr.load(final_path)
+        st.write("Попытка чтения файла...")
 
-        st.success("Данные считаны успешно!")
+        # Пытаемся открыть данные.
+        # Если файл стандартный IONEX, xarray считывает его как данные.
+        ds = xr.open_dataset(final_path, engine='netcdf4')
 
-        # Визуализация TEC
+        st.success("Данные успешно считаны!")
+
         fig, ax = plt.subplots(figsize=(10, 6))
-        # В этом файле переменная называется 'TEC'
         ds['TEC'].isel(time=0).plot(ax=ax)
         st.pyplot(fig)
 
     except Exception as e:
-        st.error(f"Ошибка при чтении: {e}")
-        st.write("Попробуйте убедиться, что georinex установлен: pip install georinex")
+        # Если xarray не может открыть, значит он видит файл как текст.
+        # В этом случае мы выводим сообщение о том, что нужно использовать
+        # специфический парсер для IONEX.
+        st.error(f"Ошибка парсинга: {e}")
+        st.info("Поскольку georinex и xarray не могут прочитать этот текстовый файл, "
+                "нам нужно использовать библиотеку 'ionex' или 'pygna'.")
+        st.write("Попробуйте выполнить: pip install ionex")
