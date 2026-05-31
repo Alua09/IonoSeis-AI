@@ -1,58 +1,54 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
+import xarray as xr
 import requests
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
-st.set_page_config(layout="wide", page_title="IonoSeis AI")
-st.title("🛰 IonoSeis: Стабильный мониторинг")
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Реальные данные")
 
 
-def get_earthquakes(lat, lon):
-    url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={lat}&longitude={lon}&maxradius=10&minmagnitude=4"
+# 1. Функция получения РЕАЛЬНЫХ данных через OPeNDAP
+@st.cache_data(ttl=3600)
+def get_real_vtec_data():
+    # Используем URL к последним картам IGS через сервис OPeNDAP
+    # Это позволяет читать данные как массив, не скачивая архивы .Z
+    url = "https://cddis.nasa.gov/thredds/dodsC/ionex/2026/150/codg1500.26i.nc"
     try:
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            quakes = []
-            for f in data.get('features', []):
-                time_val = f['properties'].get('time')
-                mag_val = f['properties'].get('mag', 0)
-                if time_val:
-                    quakes.append({'time': pd.to_datetime(time_val, unit='ms'), 'mag': mag_val})
-            return pd.DataFrame(quakes)
-        return pd.DataFrame()
-    except:
-        return pd.DataFrame()
-
-
-if st.button("🚀 ОБНОВИТЬ ДАННЫЕ"):
-    try:
-        # Данные
-        dates = pd.date_range(end=datetime.now(), periods=30, freq='D')
-        df = pd.DataFrame({'date': dates, 'vtec': np.random.uniform(15, 35, 30)})
-        quakes = get_earthquakes(43.2, 76.9)
-
-        fig = go.Figure()
-
-        # Линия VTEC
-        fig.add_trace(go.Scatter(x=df['date'], y=df['vtec'], name='VTEC', line=dict(color='#00FF00')))
-
-        # РИСУЕМ ЛИНИИ ВРУЧНУЮ (без add_vline, которая вызывает ошибку)
-        if not quakes.empty:
-            for _, q in quakes.iterrows():
-                # Рисуем вертикальный отрезок как обычный график
-                fig.add_trace(go.Scatter(
-                    x=[q['time'], q['time']],
-                    y=[df['vtec'].min(), df['vtec'].max()],
-                    mode='lines',
-                    line=dict(color='red', width=2, dash='dash'),
-                    name=f"M{q['mag']}"
-                ))
-
-        fig.update_layout(template="plotly_dark", title="Мониторинг")
-        st.plotly_chart(fig, use_container_width=True)
-        st.success("Готово!")
+        ds = xr.open_dataset(url)
+        # Извлекаем VTEC для нужной точки (индексы широты/долготы)
+        vtec = ds.TEC.isel(lat=35, lon=36)  # Примерные координаты
+        return vtec.to_series()
     except Exception as e:
-        st.error(f"Ошибка: {e}")
+        return None
+
+
+# 2. Функция землетрясений (USGS)
+def get_earthquakes():
+    url = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=2026-05-01&minmagnitude=4.5"
+    data = requests.get(url).json()
+    quakes = [{'time': pd.to_datetime(f['properties']['time'], unit='ms'), 'mag': f['properties']['mag']}
+              for f in data.get('features', [])]
+    return pd.DataFrame(quakes)
+
+
+st.title("🛰 IonoSeis: Мониторинг на РЕАЛЬНЫХ данных NASA")
+
+if st.button("🚀 ЗАГРУЗИТЬ ДАННЫЕ NASA"):
+    with st.spinner("Подключение к серверам NASA..."):
+        vtec_series = get_real_vtec_data()
+        quakes = get_earthquakes()
+
+        if vtec_series is not None:
+            fig = go.Figure()
+            fig.add_trace(
+                go.Scatter(x=vtec_series.index, y=vtec_series.values, name='VTEC', line=dict(color='#00FF00')))
+
+            # Наложение землетрясений
+            for _, q in quakes.iterrows():
+                fig.add_trace(go.Scatter(x=[q['time'], q['time']], y=[0, 50],
+                                         mode='lines', line=dict(color='red', dash='dash'), name=f"M{q['mag']}"))
+
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.error("Не удалось подключиться к серверу NASA (OPeNDAP).")
