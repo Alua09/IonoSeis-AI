@@ -1,22 +1,44 @@
 import streamlit as st
 import pandas as pd
 import requests
-import time
+import json
+import os
 
-# Использование заголовка User-Agent, чтобы серверы не видели в нас "бота"
-HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+st.set_page_config(page_title="IonoSeis: Стабильный режим")
+st.title("🛰 IonoSeis: Автономный мониторинг")
 
-def get_data_with_fallback(url):
+# Файл для хранения данных (локальный кэш)
+CACHE_FILE = "data_cache.json"
+
+
+def get_data():
+    # 1. Сначала пробуем взять из интернета
     try:
-        # Запрос через прокси-агрегатор
-        response = requests.get(url, headers=HEADERS, timeout=15)
+        url = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=10"
+        response = requests.get(url, timeout=5)
         if response.status_code == 200:
-            return response.json()
-        return None
+            data = response.json()
+            # Сохраняем в файл, чтобы был "запас"
+            with open(CACHE_FILE, 'w') as f:
+                json.dump(data, f)
+            return data
     except:
-        # Пауза перед второй попыткой (если сервер "занят")
-        time.sleep(2)
-        return None
+        pass
 
-# В коде вашего приложения замените вызовы NOAA на:
-# data = get_data_with_fallback("https://api.allorigins.win/get?url=https://services.swpc.noaa.gov/products/noaa-k-index.json")
+    # 2. Если интернет упал — берем из файла
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, 'r') as f:
+            return json.load(f)
+    return None
+
+
+if st.button("🚀 ПОКАЗАТЬ ДАННЫЕ"):
+    data = get_data()
+    if data:
+        st.success("Данные успешно отображены (из сети или из кэша).")
+        # Парсим и рисуем
+        events = data.get('features', [])
+        df = pd.DataFrame([f['properties'] for f in events])
+        st.table(df[['place', 'mag', 'time']])
+    else:
+        st.error("Данные недоступны и кэш пуст. Пожалуйста, проверьте соединение.")
