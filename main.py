@@ -1,19 +1,36 @@
 import streamlit as st
+import earthaccess
 import numpy as np
 import matplotlib.pyplot as plt
+import requests
 import gzip
 import shutil
 import os
+from datetime import datetime, timedelta
+
+# Настройка страницы
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Система мониторинга")
+st.title("🛰 IonoSeis AI: Анализ ионосферы и сейсмоактивности")
 
 
+# --- 1. АВТОРИЗАЦИЯ И ПОИСК ---
+def setup_auth():
+    # Создаем netrc файл для earthaccess (берет данные из Secrets)
+    netrc_path = os.path.expanduser("~/.netrc")
+    with open(netrc_path, "w") as f:
+        f.write(
+            f"machine urs.earthdata.nasa.gov\nlogin {st.secrets['EARTHDATA_USERNAME']}\npassword {st.secrets['EARTHDATA_PASSWORD']}")
+    os.chmod(netrc_path, 0o600)
+    earthaccess.login(strategy="netrc")
+
+
+# --- 2. ПАРСЕР IONEX ---
 def parse_upc_ionex(file_path):
-    # Распаковываем .gz
+    # Распаковка .gz
     with gzip.open(file_path, 'rb') as f_in:
-        with open("data.ionex", 'wb') as f_out:
-            shutil.copyfileobj(f_in, f_out)
+        with open("data.ionex", 'wb') as f_out: shutil.copyfileobj(f_in, f_out)
 
     tec_values = []
-    # Читаем распакованный файл
     with open("data.ionex", 'r', errors='ignore') as f:
         in_block = False
         for line in f:
@@ -21,8 +38,7 @@ def parse_upc_ionex(file_path):
                 in_block = True
             elif 'END OF TEC MAP' in line:
                 in_block = False
-            elif in_block and not any(x in line for x in ['LAT/LON1/LON2', 'EPOCH']):
-                # В этом формате данные идут в одну строку, разделенные пробелами
+            elif in_block and not any(x in line for x in ['LAT/LON1/LON2', 'EPOCH', 'START', 'END']):
                 parts = line.split()
                 for p in parts:
                     try:
@@ -30,27 +46,46 @@ def parse_upc_ionex(file_path):
                         if val < 9000: tec_values.append(val)
                     except:
                         continue
-
-    # Для UPC карт сетка обычно 71x73
-    data = np.array(tec_values)
-    return data[:5183].reshape((71, 73))
+    return np.array(tec_values[:5183]).reshape((71, 73))
 
 
-# --- ВСТАВЬТЕ ЭТО В ВАШУ КНОПКУ ---
-if st.button("🚀 ПОСТРОИТЬ КАРТУ ИЗ UPC"):
+# --- 3. ОСНОВНОЙ ИНТЕРФЕЙС ---
+if st.button("🚀 ОБНОВИТЬ КАРТУ (NASA + USGS)"):
     try:
-        # Указываем имя скачанного файла
-        grid = parse_upc_ionex("./tmp/UPC0OPSFIN_20261210000_01D_02H_GIM.INX.gz")
+        with st.spinner("Синхронизация данных..."):
+            setup_auth()
+            # Поиск файла
+            results = earthaccess.search_data(
+                short_name='GNSS_IGS_AC_ion_VTEC_comp',
+                temporal=(datetime.now() - timedelta(days=5), datetime.now()),
+                count=1
+            )
+            files = earthaccess.download(results, "./tmp")
 
-        fig, ax = plt.subplots(figsize=(10, 5))
-        # Визуализация
-        im = ax.imshow(np.flipud(grid.T), cmap='jet', interpolation='bicubic',
-                       extent=[-180, 180, -87.5, 87.5], aspect='auto')
+            # Парсинг
+            grid = parse_upc_ionex(files[0])
 
-        plt.colorbar(im, label='VTEC')
-        ax.set_title("Глобальная карта VTEC (UPC Analysis Center)")
-        st.pyplot(fig)
+            # Визуализация
+            fig, ax = plt.subplots(figsize=(12, 6))
+            im = ax.imshow(np.flipud(grid.T), cmap='jet', interpolation='bicubic',
+                           extent=[-180, 180, -87.5, 87.5], aspect='auto', alpha=0.8)
 
-        st.success("Данные успешно визуализированы!")
+            # Наложение землетрясений (USGS)
+            quakes = requests.get(
+                "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=5&limit=20").json()
+            for f in quakes['features']:
+                lon, lat = f['geometry']['coordinates'][:2]
+                ax.scatter(lon, lat, color='white', marker='*', s=120, edgecolors='black', label='EQ (>5.0)')
+
+            # Наложение аномалий (VTEC > 700)
+            anom_y, anom_x = np.where(grid.T > 700)
+            ax.scatter((anom_x * (360 / 73) - 180), (anom_y * (175 / 71) - 87.5),
+                       color='red', s=10, alpha=0.5, label='Аномалия')
+
+            plt.colorbar(im, label='VTEC')
+            ax.set_title("Глобальная карта: Ионосфера vs Сейсмические события")
+            st.pyplot(fig)
+            st.success("Данные успешно синхронизированы.")
+
     except Exception as e:
-        st.error(f"Ошибка при парсинге: {e}")
+        st.error(f"Ошибка процесса: {e}")
