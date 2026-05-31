@@ -10,11 +10,9 @@ st.set_page_config(layout="wide", page_title="IonoSeis AI")
 st.title("🛰 IonoSeis: Стабильный мониторинг ионосферы")
 
 
-# 1. Функция получения землетрясений с безопасной обработкой типов
+# 1. Функция получения землетрясений
 def get_earthquakes(lat, lon):
-    # Используем строковое форматирование для URL, чтобы избежать ошибок типов
-    url = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={}&longitude={}&maxradius=10&minmagnitude=4".format(
-        lat, lon)
+    url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={lat}&longitude={lon}&maxradius=10&minmagnitude=4"
     try:
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
@@ -22,15 +20,15 @@ def get_earthquakes(lat, lon):
             quakes = []
             for f in data.get('features', []):
                 time_val = f['properties'].get('time')
-                mag_val = f['properties'].get('mag', 0)
-                if time_val:
+                mag_val = f['properties'].get('mag')
+                if time_val and mag_val is not None:
                     quakes.append({
                         'time': pd.to_datetime(time_val, unit='ms'),
-                        'mag': str(mag_val)  # Принудительно в строку
+                        'mag': float(mag_val)
                     })
             return pd.DataFrame(quakes)
         return pd.DataFrame()
-    except Exception:
+    except:
         return pd.DataFrame()
 
 
@@ -59,15 +57,16 @@ if st.button("🚀 ОБНОВИТЬ ДАННЫЕ"):
         # Красные линии землетрясений
         if not quakes.empty:
             for _, q in quakes.iterrows():
-                # Преобразуем время в ISO-строку, а магнитуду гарантированно в строку
-                time_str = q['time'].strftime('%Y-%m-%d %H:%M:%S')
-                mag_str = str(q['mag'])
+                # Конвертация в строки заранее
+                date_str = q['time'].strftime('%Y-%m-%d %H:%M:%S')
+                label = "M" + str(round(q['mag'], 1))
 
                 fig.add_vline(
-                    x=time_str,
+                    x=date_str,
                     line_dash="dash",
                     line_color="red",
-                    annotation_text="M" + mag_str  # Явная конкатенация строк
+                    annotation_text=label,
+                    annotation_position="top"
                 )
 
         fig.update_layout(
