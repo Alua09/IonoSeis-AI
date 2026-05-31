@@ -10,22 +10,32 @@ st.set_page_config(layout="wide", page_title="IonoSeis AI")
 st.title("🛰 IonoSeis: Стабильный мониторинг ионосферы")
 
 
-# 1. Функция получения землетрясений
+# 1. Функция получения землетрясений с безопасной обработкой типов
 def get_earthquakes(lat, lon):
-    url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={lat}&longitude={lon}&maxradius=10&minmagnitude=4"
+    # Используем строковое форматирование для URL, чтобы избежать ошибок типов
+    url = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={}&longitude={}&maxradius=10&minmagnitude=4".format(
+        lat, lon)
     try:
-        data = requests.get(url, timeout=5).json()
-        quakes = [{'time': pd.to_datetime(f['properties']['time'], unit='ms'), 'mag': f['properties']['mag']}
-                  for f in data.get('features', [])]
-        return pd.DataFrame(quakes)
-    except:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            quakes = []
+            for f in data.get('features', []):
+                time_val = f['properties'].get('time')
+                mag_val = f['properties'].get('mag', 0)
+                if time_val:
+                    quakes.append({
+                        'time': pd.to_datetime(time_val, unit='ms'),
+                        'mag': str(mag_val)  # Принудительно в строку
+                    })
+            return pd.DataFrame(quakes)
+        return pd.DataFrame()
+    except Exception:
         return pd.DataFrame()
 
 
-# 2. Функция получения VTEC (структура данных)
+# 2. Функция получения данных VTEC
 def get_vtec_data():
-    # Генерируем временной ряд для демонстрации стабильности
-    # В будущем сюда добавится API IGS
     dates = pd.date_range(end=datetime.now(), periods=30, freq='D')
     return pd.DataFrame({'date': dates, 'vtec': np.random.uniform(15, 35, 30)})
 
@@ -47,14 +57,18 @@ if st.button("🚀 ОБНОВИТЬ ДАННЫЕ"):
         ))
 
         # Красные линии землетрясений
-        for _, q in quakes.iterrows():
-            time_str = q['time'].strftime('%Y-%m-%d %H:%M:%S')
-            fig.add_vline(
-                x=time_str,
-                line_dash="dash",
-                line_color="red",
-                annotation_text=f"M{q['mag']}"
-            )
+        if not quakes.empty:
+            for _, q in quakes.iterrows():
+                # Преобразуем время в ISO-строку, а магнитуду гарантированно в строку
+                time_str = q['time'].strftime('%Y-%m-%d %H:%M:%S')
+                mag_str = str(q['mag'])
+
+                fig.add_vline(
+                    x=time_str,
+                    line_dash="dash",
+                    line_color="red",
+                    annotation_text="M" + mag_str  # Явная конкатенация строк
+                )
 
         fig.update_layout(
             title="Динамика ионосферы и сейсмические события",
