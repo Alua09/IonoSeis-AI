@@ -19,38 +19,36 @@ except Exception as e:
 
 url = "https://cddis.nasa.gov/archive/gnss/products/ionex/2026/150/casg1500.26i.Z"
 
-if st.button("🚀 Загрузить и обработать IONEX"):
-    with st.spinner("Авторизованное скачивание и распаковка..."):
+if st.button("🚀 Найти и загрузить актуальный IONEX"):
+    with st.spinner("Поиск актуальных данных..."):
         try:
-            local_filename = "casg1500.26i.Z"
+            # 1. Поиск актуального файла через метаданные NASA
+            results = earthaccess.search_data(
+                short_name='GNSS_IGS_AC_ion_VTEC_comp',
+                temporal=('2026-05-25', '2026-05-31'),
+                count=1
+            )
 
-            # Скачивание через авторизованную сессию
-            response = session.get(url, stream=True)
-            if response.status_code == 200:
-                with open(local_filename, 'wb') as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-
-                final_path = "data.ionex"
-
-                # Распаковка
-                with gzip.open(local_filename, 'rb') as f_in:
-                    with open(final_path, 'wb') as f_out:
-                        shutil.copyfileobj(f_in, f_out)
-
-                # Чтение через georinex
-                ds = gr.load(final_path)
-
-                st.success("Данные успешно считаны!")
-                fig, ax = plt.subplots(figsize=(10, 6))
-
-                if 'TEC' in ds:
-                    ds['TEC'].isel(time=0).plot(ax=ax)
-                    st.pyplot(fig)
-                else:
-                    st.write("Структура данных:", ds)
+            if not results:
+                st.error("Файлы не найдены в архиве.")
             else:
-                st.error(f"Ошибка доступа: сервер вернул код {response.status_code}. Проверьте Secrets.")
+                # Получаем прямую URL-ссылку из найденного результата
+                data_url = results[0].data_links()[0]
+                st.write(f"Найден файл: {data_url}")
+
+                # 2. Скачивание найденного файла через сессию
+                response = session.get(data_url, stream=True)
+
+                if response.status_code == 200:
+                    local_filename = "data.ionex.Z"
+                    with open(local_filename, 'wb') as f:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            f.write(chunk)
+
+                    # ... далее код распаковки и gr.load(final_path) ...
+                    st.success("Данные успешно скачаны!")
+                else:
+                    st.error(f"Ошибка при скачивании {data_url}: код {response.status_code}")
 
         except Exception as e:
-            st.error(f"Ошибка обработки: {e}")
+            st.error(f"Ошибка: {e}")
