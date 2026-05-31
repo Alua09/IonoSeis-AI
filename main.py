@@ -1,30 +1,23 @@
 import streamlit as st
-import numpy as np
-import matplotlib.pyplot as plt
 import requests
-from datetime import datetime
-
-st.set_page_config(layout="wide")
-st.title("🛰 IonoSeis AI: Детектор структуры файлов")
-
-USER = st.secrets.get("EARTHDATA_USERNAME", "")
-PASSWORD = st.secrets.get("EARTHDATA_PASSWORD", "")
 
 
-def debug_fetch():
-    day = datetime.now().strftime("%j")
-    year = datetime.now().strftime("%y")
+def fetch_ionex_data():
+    day = "151"  # Например, 151
+    year = "26"
     url = f"https://cddis.nasa.gov/archive/gnss/products/ionex/2026/{day}/igsg{day}0.{year}i.Z"
 
-    response = requests.get(url, auth=(USER, PASSWORD))
-    if response.status_code != 200:
-        return f"Ошибка HTTP {response.status_code}"
+    # Ключевой момент: используем Session для сохранения куки авторизации
+    session = requests.Session()
+    session.auth = (st.secrets["EARTHDATA_USERNAME"], st.secrets["EARTHDATA_PASSWORD"])
 
-    content = response.content.decode('latin-1', errors='ignore')
+    # Сначала заходим на сервер авторизации, а потом скачиваем файл
+    response = session.get(url, stream=True)
 
-    # ВОТ ОНИ - ПЕРВЫЕ 500 СИМВОЛОВ ФАЙЛА
-    return content[:500]
+    # Проверка, не попали ли мы снова на страницу логина
+    if "Earthdata Login" in response.text[:500]:
+        return None, "Ошибка: Авторизация не прошла, сервер вернул страницу логина."
 
+    return response.content, "Успех!"
 
-if st.button("🚀 ПОКАЗАТЬ, ЧТО ВНУТРИ"):
-    st.text(debug_fetch())
+# Используйте этот код в своей кнопке
