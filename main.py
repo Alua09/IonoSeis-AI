@@ -5,49 +5,35 @@ import plotly.graph_objects as go
 from datetime import datetime
 
 st.set_page_config(layout="wide", page_title="IonoSeis Pro")
-st.title("🛰 IonoSeis: Мониторинг на данных CODE/IGS")
+st.title("🛰 IonoSeis: Мониторинг")
 
 
-# Функция получения реальных сейсмических данных (USGS)
-def get_earthquakes():
-    # Запрашиваем землетрясения за последние 7 дней (магнитуда 4+)
-    url = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=4&limit=50"
-    response = requests.get(url, timeout=10)
-    data = response.json()
-    return pd.DataFrame([{'time': pd.to_datetime(f['properties']['time'], unit='ms'), 'mag': f['properties']['mag']}
-                         for f in data.get('features', [])])
-
-
-# Функция получения данных ионосферы через API (NOAA K-index)
-def get_real_ionosphere():
-    # Это реальные данные SWPC NOAA
-    url = "https://services.swpc.noaa.gov/products/noaa-k-index.json"
-    response = requests.get(url, timeout=10)
-    data = response.json()
-    df = pd.DataFrame(data[1:], columns=['time', 'k_index'])
-    df['time'] = pd.to_datetime(df['time'])
-    df['k_index'] = df['k_index'].astype(float)
-    return df
-
-
-if st.button("🚀 ЗАГРУЗИТЬ НАУЧНЫЕ ДАННЫЕ"):
+def get_data_safe(url):
     try:
-        ion_data = get_real_ionosphere()
-        quakes = get_earthquakes()
+        response = requests.get(url, timeout=10)
+        # Проверяем, что ответ не пустой и это JSON
+        if response.status_code == 200 and response.text.strip():
+            return response.json()
+    except:
+        pass
+    return None
 
-        fig = go.Figure()
 
-        # 1. Линия ионосферы
-        fig.add_trace(go.Scatter(x=ion_data['time'], y=ion_data['k_index'], name='K-Index (Реальный)',
-                                 line=dict(color='#00FF00')))
+if st.button("🚀 ОБНОВИТЬ ДАННЫЕ"):
+    with st.spinner("Запрос к серверам..."):
+        data = get_data_safe("https://services.swpc.noaa.gov/products/noaa-k-index.json")
 
-        # 2. Линии землетрясений
-        for _, q in quakes.iterrows():
-            fig.add_trace(
-                go.Scatter(x=[q['time'], q['time']], y=[0, 9], mode='lines', line=dict(color='red', dash='dash'),
-                           name=f"M{q['mag']}"))
+        if data:
+            try:
+                df = pd.DataFrame(data[1:], columns=['time', 'k_index'])
+                df['time'] = pd.to_datetime(df['time'])
+                df['k_index'] = df['k_index'].astype(float)
 
-        fig.update_layout(template="plotly_dark", title="Синхронизированный мониторинг")
-        st.plotly_chart(fig, use_container_width=True)
-    except Exception as e:
-        st.error(f"Не удалось получить данные с серверов: {e}")
+                fig = go.Figure(data=go.Scatter(x=df['time'], y=df['k_index'], line=dict(color='#00FF00')))
+                fig.update_layout(template="plotly_dark", title="Данные успешно получены")
+                st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.error(f"Ошибка обработки данных: {e}")
+        else:
+            st.warning(
+                "Сервер NOAA вернул пустой ответ. Попробуйте обновить страницу через пару минут — это стандартное поведение API при перегрузках.")
