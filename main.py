@@ -1,86 +1,88 @@
 import streamlit as st
-import pandas as pd
+import earthaccess
+import numpy as np
+import matplotlib.pyplot as plt
 import requests
-import json
+import gzip
+import shutil
 import os
+from datetime import datetime, timedelta
 
 # Настройка страницы
-st.set_page_config(page_title="IonoSeis Pro", layout="wide")
-st.title("🛰 IonoSeis: Мониторинг сейсмики и ионосферы")
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Алматы")
+st.title("🛰 IonoSeis AI: Глубокий анализ ионосферы")
 
+# Координаты Алматы
 ALMATY_LAT, ALMATY_LON = 43.25, 76.92
-KP_CACHE = "kp_cache.json"
 
 
-# 1. Сейсмика
-@st.cache_data(ttl=300)
-def get_seismic():
-    try:
-        url = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=100"
-        response = requests.get(url, timeout=10)
-        return response.json() if response.status_code == 200 else None
-    except:
-        return None
+# --- ФУНКЦИИ ---
+def setup_auth():
+    # Использование секретов Streamlit
+    os.environ['EARTHDATA_USERNAME'] = st.secrets['EARTHDATA_USERNAME']
+    os.environ['EARTHDATA_PASSWORD'] = st.secrets['EARTHDATA_PASSWORD']
+    earthaccess.login(strategy="environment")
 
 
-# 2. Ионосфера (через прокси с fallback на кэш)
-def get_kp_index():
-    # Прокси для обхода блокировок
-    url = "https://api.allorigins.win/get?url=https://services.swpc.noaa.gov/products/noaa-k-index.json"
-    try:
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            content = json.loads(response.json()['contents'])
-            df = pd.DataFrame(content[1:], columns=['time', 'kp'])
-            df.to_json(KP_CACHE)  # Сохраняем в кэш
-            return df
-    except:
-        pass
+def parse_upc_ionex(file_path):
+    # Распаковка и парсинг
+    with gzip.open(file_path, 'rb') as f_in:
+        with open("data.ionex", 'wb') as f_out: shutil.copyfileobj(f_in, f_out)
 
-    # Если прокси не ответил, пытаемся прочитать файл кэша
-    if os.path.exists(KP_CACHE):
-        return pd.read_json(KP_CACHE)
-    return None
+    tec_values = []
+    with open("data.ionex", 'r', errors='ignore') as f:
+        in_block = False
+        for line in f:
+            if 'START OF TEC MAP' in line:
+                in_block = True
+            elif 'END OF TEC MAP' in line:
+                in_block = False
+            elif in_block and not any(x in line for x in ['LAT/LON1/LON2', 'EPOCH', 'START', 'END']):
+                parts = line.split()
+                for p in parts:
+                    try:
+                        val = float(p)
+                        if val < 9000: tec_values.append(val)
+                    except:
+                        continue
+    # Преобразуем в сетку
+    return np.array(tec_values[:5183]).reshape((71, 73))
+
+
+def get_almaty_tec(grid):
+    # Преобразование координат в индексы сетки IONEX
+    # LAT: -87.5 to 87.5 (71 шаг), LON: -180 to 180 (73 шага)
+    lat_idx = int((ALMATY_LAT + 87.5) / 2.5)
+    lon_idx = int((ALMATY_LON + 180) / 5.0)
+    return grid[lat_idx, lon_idx]
 
 
 # --- ИНТЕРФЕЙС ---
-if st.button("🚀 ОБНОВИТЬ СИСТЕМУ"):
-    seismic = get_seismic()
-    kp_df = get_kp_index()
+if st.button("🚀 ЗАПУСТИТЬ АНАЛИЗ NASA + USGS"):
+    try:
+        with st.spinner("Синхронизация с NASA Earthdata..."):
+            setup_auth()
+            results = earthaccess.search_data(
+                short_name='GNSS_IGS_AC_ion_VTEC_comp',
+                temporal=(datetime.now() - timedelta(days=2), datetime.now()),
+                count=1
+            )
+            files = earthaccess.download(results, "./tmp")
+            grid = parse_upc_ionex(files[0])
 
-    col1, col2 = st.columns(2)
+            # Анализ
+            val = get_almaty_tec(grid)
 
-    # Блок Сейсмики
-    with col1:
-        st.subheader("⚠️ Сейсмика (Алматы 300 км)")
-        if seismic:
-            features = seismic.get('features', [])
-            records = [{'place': f['properties']['place'], 'mag': f['properties']['mag'],
-                        'lat': f['geometry']['coordinates'][1], 'lon': f['geometry']['coordinates'][0]} for f in
-                       features]
-            df = pd.DataFrame(records)
-            df['dist'] = ((df['lat'] - ALMATY_LAT) ** 2 + (df['lon'] - ALMATY_LON) ** 2) ** 0.5 * 111
-            local = df[df['dist'] < 300].sort_values(by='dist')
-            if not local.empty:
-                st.dataframe(local[['place', 'mag', 'dist']], use_container_width=True)
-            else:
-                st.info("Тишина: в радиусе 300 км событий нет.")
-        else:
-            st.error("Сервер сейсмики недоступен.")
+            # Вывод данных
+            st.metric("Плотность ионосферы над Алматы (VTEC)", f"{val:.2f} TECU")
 
-    # Блок Ионосферы
-    with col2:
-        st.subheader("☀️ Ионосфера (Kp-Index)")
-        if kp_df is not None and not kp_df.empty:
-            try:
-                kp_val = float(kp_df.iloc[-1]['kp'])
-                status = "Стабильно" if kp_val < 4 else "АКТИВНОСТЬ"
-                st.metric("Kp-индекс", kp_val, status)
-                st.line_chart(kp_df.tail(15).set_index('time')['kp'])
-            except:
-                st.warning("Ошибка обработки данных.")
-        else:
-            st.warning("Данные еще не были загружены. Попробуйте еще раз через минуту.")
+            # Сейсмический блок USGS
+            quakes = requests.get("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=10").json()
+            st.subheader("Последние сейсмические события")
+            for f in quakes['features'][:5]:
+                st.write(f"- {f['properties']['place']} | Магнитуда: {f['properties']['mag']}")
 
-st.sidebar.markdown("---")
-st.sidebar.write("### Статус: Активен")
+            st.success("Данные успешно синхронизированы.")
+
+    except Exception as e:
+        st.error(f"Ошибка синхронизации: {e}")
