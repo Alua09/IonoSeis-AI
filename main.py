@@ -5,11 +5,12 @@ import requests
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
+# Настройка страницы
 st.set_page_config(layout="wide", page_title="IonoSeis AI")
-st.title("🛰 IonoSeis: Стабильный мониторинг")
+st.title("🛰 IonoSeis: Стабильный мониторинг ионосферы")
 
 
-# Функция получения данных о землетрясениях
+# 1. Функция получения землетрясений
 def get_earthquakes(lat, lon):
     url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={lat}&longitude={lon}&maxradius=10&minmagnitude=4"
     try:
@@ -21,22 +22,48 @@ def get_earthquakes(lat, lon):
         return pd.DataFrame()
 
 
-# Функция получения VTEC (имитация для примера, пока мы не подключили конкретный URL API)
+# 2. Функция получения VTEC (структура данных)
 def get_vtec_data():
+    # Генерируем временной ряд для демонстрации стабильности
+    # В будущем сюда добавится API IGS
     dates = pd.date_range(end=datetime.now(), periods=30, freq='D')
-    # Здесь можно будет заменить на реальный запрос к API IGS
     return pd.DataFrame({'date': dates, 'vtec': np.random.uniform(15, 35, 30)})
 
 
+# 3. Основная логика
 if st.button("🚀 ОБНОВИТЬ ДАННЫЕ"):
-    df = get_vtec_data()
-    quakes = get_earthquakes(43.2, 76.9)  # Алматы
+    try:
+        df = get_vtec_data()
+        quakes = get_earthquakes(43.2, 76.9)  # Алматы
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df['date'], y=df['vtec'], name='VTEC Уровень', line=dict(color='green')))
+        fig = go.Figure()
 
-    for _, q in quakes.iterrows():
-        fig.add_vline(x=q['time'], line_dash="dash", line_color="red", annotation_text=f"M{q['mag']}")
+        # Линия VTEC
+        fig.add_trace(go.Scatter(
+            x=df['date'],
+            y=df['vtec'],
+            name='VTEC Уровень',
+            line=dict(color='#00FF00', width=2)
+        ))
 
-    fig.update_layout(title="Мониторинг ионосферы и сейсмические события", template="plotly_dark")
-    st.plotly_chart(fig, use_container_width=True)
+        # Красные линии землетрясений
+        for _, q in quakes.iterrows():
+            time_str = q['time'].strftime('%Y-%m-%d %H:%M:%S')
+            fig.add_vline(
+                x=time_str,
+                line_dash="dash",
+                line_color="red",
+                annotation_text=f"M{q['mag']}"
+            )
+
+        fig.update_layout(
+            title="Динамика ионосферы и сейсмические события",
+            template="plotly_dark",
+            xaxis_title="Дата",
+            yaxis_title="VTEC Units"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        st.success("Данные успешно обновлены!")
+
+    except Exception as e:
+        st.error(f"Ошибка при построении графика: {e}")
