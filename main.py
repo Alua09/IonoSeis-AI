@@ -85,7 +85,7 @@ if st.button("🚀 ЗАПУСТИТЬ АНАЛИЗ (NASA + USGS)"):
 
                 if local_quakes:
                     for q in local_quakes:
-                        if q['dist'] < 500 or q['mag'] > 4.0:
+                        if q['dist'] < 500 or q['mag'] > 2.0:
                             st.error(f"⚠️ {q['place']} | Магнитуда: {q['mag']} | Расстояние: {q['dist']} км")
                         else:
                             st.write(f"🔹 {q['place']} | Магнитуда: {q['mag']} | Расстояние: {q['dist']} км")
