@@ -9,12 +9,12 @@ import requests
 from datetime import datetime, timedelta
 
 # Настройка страницы
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Анализ")
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Мониторинг")
+st.title("🛰 IonoSeis AI: Анализ ионосферы")
 
 
-# --- 1. ПАРСЕР (ОБЯЗАТЕЛЬНО В НАЧАЛЕ) ---
+# --- ФУНКЦИЯ ПАРСИНГА ---
 def parse_upc_ionex(file_path):
-    # Распаковка .gz
     with gzip.open(file_path, 'rb') as f_in:
         with open("data.ionex", 'wb') as f_out: shutil.copyfileobj(f_in, f_out)
 
@@ -34,52 +34,60 @@ def parse_upc_ionex(file_path):
                         if val < 9000: tec_values.append(val)
                     except:
                         continue
-    # Преобразуем в массив 71x73
     return np.array(tec_values[:5183]).reshape((71, 73))
 
 
-# --- 2. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
+# --- ФУНКЦИЯ КООРДИНАТ ---
 def get_vtec_for_coords(grid, lat, lon):
-    # Индексы сетки
     lat_idx = int((lat + 87.5) / 2.5)
     lon_idx = int((lon + 180) / 5.0)
     return grid[min(lat_idx, 70), min(lon_idx, 72)]
 
 
-# --- 3. ИНТЕРФЕЙС ---
-st.title("🛰 IonoSeis: Анализ Алматы и Токио")
-
-if st.button("🚀 ПОСТРОИТЬ ГРАФИКИ ПУЛЬСА"):
+# --- ОСНОВНАЯ ЛОГИКА ---
+if st.button("🚀 ЗАПУСТИТЬ ПОЛНЫЙ ЦИКЛ АНАЛИЗА"):
     try:
-        # Авторизация
-        earthaccess.login(strategy="netrc")
+        with st.spinner("Авторизация и поиск данных..."):
+            # Создаем netrc
+            netrc_path = os.path.expanduser("~/.netrc")
+            with open(netrc_path, "w") as f:
+                f.write(
+                    f"machine urs.earthdata.nasa.gov\nlogin {st.secrets['EARTHDATA_USERNAME']}\npassword {st.secrets['EARTHDATA_PASSWORD']}")
+            os.chmod(netrc_path, 0o600)
+            earthaccess.login(strategy="netrc")
 
-        # Поиск
-        results = earthaccess.search_data(
-            short_name='GNSS_IGS_AC_ion_VTEC_comp',
-            temporal=(datetime.now() - timedelta(days=2), datetime.now()),
-            count=1
-        )
-        files = earthaccess.download(results, "./tmp")
+            # Поиск
+            results = earthaccess.search_data(
+                short_name='GNSS_IGS_AC_ion_VTEC_comp',
+                temporal=(datetime.now() - timedelta(days=10), datetime.now()),
+                count=1
+            )
 
-        # Парсинг
-        grid = parse_upc_ionex(files[0])
+            if not results:
+                st.error("Данные не найдены. Проверьте настройки коллекции в Earthdata Search.")
+                st.stop()
 
-        # Координаты
-        locations = {"Алматы": (43.2, 76.9), "Токио": (35.6, 139.6)}
+            # Скачивание
+            files = earthaccess.download(results, "./tmp")
+            if not files:
+                st.error("Ошибка: список скачанных файлов пуст.")
+                st.stop()
 
-        # Графики
-        fig, ax = plt.subplots(figsize=(10, 6))
+            grid = parse_upc_ionex(files[0])
 
-        for name, (lat, lon) in locations.items():
-            val = get_vtec_for_coords(grid, lat, lon)
-            ax.bar(name, val, color='green' if name == "Алматы" else 'blue', alpha=0.7)
+            # Визуализация
+            locations = {"Алматы": (43.2, 76.9), "Токио": (35.6, 139.6)}
+            fig, ax = plt.subplots(figsize=(10, 5))
 
-        ax.set_ylabel("Уровень VTEC")
-        ax.set_title("Сравнение ионосферного фона")
-        st.pyplot(fig)
+            names = list(locations.keys())
+            values = [get_vtec_for_coords(grid, *coords) for coords in locations.values()]
 
-        st.success("Анализ завершен.")
+            ax.bar(names, values, color=['green', 'blue'], alpha=0.7)
+            ax.set_title("Уровень VTEC: Алматы vs Токио")
+            ax.set_ylabel("VTEC Units")
+
+            st.pyplot(fig)
+            st.success("Анализ завершен успешно!")
 
     except Exception as e:
-        st.error(f"Ошибка: {e}")
+        st.error(f"Критическая ошибка: {e}")
