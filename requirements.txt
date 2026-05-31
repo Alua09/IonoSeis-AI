@@ -5,3 +5,5 @@ requests
 plotly
 xarray
 netCDF4
+earthaccess
+h5netcdf
