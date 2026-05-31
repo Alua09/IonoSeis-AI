@@ -6,11 +6,12 @@ import requests
 import gzip
 import shutil
 import os
+import pandas as pd
 from datetime import datetime, timedelta
 
 # Настройка страницы
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Алматы")
-st.title("🛰 IonoSeis AI: Анализ ионосферы и сейсмоактивности")
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Аналитика")
+st.title("🛰 IonoSeis AI: Мониторинг ионосферы и сейсмики")
 
 ALMATY_LAT, ALMATY_LON = 43.25, 76.92
 
@@ -52,7 +53,7 @@ def get_almaty_tec(grid):
 
 
 # --- ИНТЕРФЕЙС ---
-if st.button("🚀 ЗАПУСТИТЬ АНАЛИЗ (NASA + USGS)"):
+if st.button("🚀 ОБНОВИТЬ ДАННЫЕ"):
     try:
         with st.spinner("Синхронизация с серверами..."):
             setup_auth()
@@ -65,34 +66,40 @@ if st.button("🚀 ЗАПУСТИТЬ АНАЛИЗ (NASA + USGS)"):
 
             if results and len(results) > 0:
                 files = earthaccess.download(results, "./tmp")
-                if files:
-                    grid = parse_upc_ionex(files[0])
-                    val = get_almaty_tec(grid)
-                    st.metric("Плотность ионосферы над Алматы (VTEC)", f"{val:.2f} TECU")
+                grid = parse_upc_ionex(files[0])
+                val = get_almaty_tec(grid)
 
-                # 2. Сейсмика (Фильтр Алматы 1000 км)
-                st.subheader("Сейсмическая активность (фокус: Алматы, 1000 км)")
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.metric("Плотность ионосферы над Алматы (VTEC)", f"{val:.2f} TECU")
+                    fig, ax = plt.subplots(figsize=(10, 2))
+                    ax.barh(0, val, color='skyblue' if val < 80 else 'red')
+                    ax.set_xlim(0, 150)
+                    ax.set_title("Текущий уровень VTEC (Норма до 80 TECU)")
+                    st.pyplot(fig)
+
+                # 2. Сейсмика
                 quakes = requests.get(
                     "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=100").json()
-
                 local_quakes = []
                 for f in quakes['features']:
                     lon, lat = f['geometry']['coordinates'][:2]
                     dist = ((lat - ALMATY_LAT) ** 2 + (lon - ALMATY_LON) ** 2) ** 0.5 * 111
-                    if dist < 1000:
+                    if dist < 1000 and f['properties']['mag'] > 2.0:
                         local_quakes.append(
                             {'place': f['properties']['place'], 'mag': f['properties']['mag'], 'dist': round(dist)})
 
-                if local_quakes:
-                    for q in local_quakes:
-                        if q['dist'] < 500 or q['mag'] > 2.0:
-                            st.error(f"⚠️ {q['place']} | Магнитуда: {q['mag']} | Расстояние: {q['dist']} км")
-                        else:
-                            st.write(f"🔹 {q['place']} | Магнитуда: {q['mag']} | Расстояние: {q['dist']} км")
-                else:
-                    st.info("В радиусе 1000 км значимых событий нет.")
+                with col2:
+                    st.subheader("Сейсмика (Алматы 1000 км)")
+                    if local_quakes:
+                        df_q = pd.DataFrame(local_quakes)
+                        st.bar_chart(df_q.set_index('place')['mag'])
+                        for q in local_quakes:
+                            st.write(f"🔹 {q['place']} | M: {q['mag']} | {q['dist']} км")
+                    else:
+                        st.info("Спокойно: в радиусе 1000 км событий > 2.0 нет.")
             else:
-                st.warning("Нет новых данных от NASA за последние 5 дней.")
-
+                st.warning("Нет новых данных NASA.")
     except Exception as e:
-        st.error(f"Ошибка процесса: {e}")
+        st.error(f"Ошибка: {e}")
