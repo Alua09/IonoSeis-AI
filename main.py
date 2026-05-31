@@ -25,25 +25,31 @@ def authenticate():
 
 # --- ПОИСК И СКАЧИВАНИЕ ---
 def get_latest_data(lat, lon):
-    # Пытаемся найти данные в разных коллекциях
-    collections = ['IGS_GIM', 'GIM_IONEX', 'GPS_IONEX']
+    # Пытаемся взять данные из коллекции IGS_GIM напрямую
+    query = earthaccess.search_data(
+        short_name='IGS_GIM',
+        temporal=(datetime.now() - timedelta(days=30), datetime.now())
+    )
 
-    for coll in collections:
-        try:
-            results = earthaccess.search_data(
-                short_name=coll,
-                temporal=(datetime.now() - timedelta(days=15), datetime.now())
-            )
-            if results:
-                # Скачиваем файл
-                files = earthaccess.download(results[-1], "./tmp")
-                ds = xr.open_dataset(files[0])
-                # Авто-определение переменной TEC
-                field = 'TEC' if 'TEC' in ds else list(ds.data_vars)[0]
-                return ds.sel(lat=lat, lon=lon, method='nearest')[field].values
-        except:
-            continue
-    raise Exception("Данные недоступны в текущих коллекциях NASA.")
+    if not query:
+        raise Exception("NASA вернула пустой список для IGS_GIM")
+
+    # Скачиваем файл
+    files = earthaccess.download(query[-1], "./tmp")
+    ds = xr.open_dataset(files[0])
+
+    # ПРИНУДИТЕЛЬНЫЙ ВЫБОР: выводим список того, что внутри файла, если ошибка
+    # Это поможет нам понять, как называются данные
+    try:
+        # Ищем переменную по ключевым словам
+        possible_vars = ['TEC', 'tec', 'ion', 'vtec']
+        found_var = next((v for v in ds.data_vars if v in possible_vars), list(ds.data_vars)[0])
+
+        # Берем данные
+        return ds[found_var].sel(lat=lat, lon=lon, method='nearest').values.flatten()
+    except Exception as e:
+        st.write(f"Структура файла: {list(ds.data_vars)}")  # ДЕБАГ: выведет названия переменных на экран
+        raise e
 
 
 # --- ИНТЕРФЕЙС ---
