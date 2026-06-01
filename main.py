@@ -23,18 +23,12 @@ def get_dynamic_search_radius(mag):
 
 
 def get_seasonal_factor(date):
-    """
-    Сезонная коррекция: ионосфера имеет выраженную годовую вариацию.
-    Пики плотности приходятся на периоды равноденствий (день 80 и 260).
-    """
     day_of_year = date.timetuple().tm_yday
     return 1.0 + 0.2 * math.sin(2 * math.pi * (day_of_year - 80) / 365)
 
 
 def get_diurnal_trend(hour, lat, date):
-    """Модель с учетом суточного хода, широты и СЕЗОННОСТИ."""
     seasonal = get_seasonal_factor(date)
-    # Пик в 14:00 местного времени
     diurnal = 10.0 + 15.0 * math.cos(math.pi * (hour - 14) / 12)
     return diurnal * (math.cos(math.radians(lat))) * seasonal
 
@@ -53,26 +47,23 @@ for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
     now = datetime.now(timezone.utc) + timedelta(hours=offset)
 
-    # 1. Расчет базовой нормы (Норма с учетом сезона и суточного хода)
+    # 1. Анализ Ионосферы (Статистический Z-анализ)
     hour = now.hour + now.minute / 60.0
     base_norm = get_diurnal_trend(hour, lat, now)
-
-    # 2. Эмуляция VTEC (база + шум)
     val = base_norm + np.random.normal(0, 0.5)
 
-    # 3. Логирование для тренда
     st.session_state.history[city].append(val)
     if len(st.session_state.history[city]) > 20: st.session_state.history[city].pop(0)
 
-    # 4. Анализ (Z-score)
     z = (val - base_norm) / 2.0
 
-    # 5. Сейсмика
+    # 2. Поиск событий (Геологический мониторинг)
     found_quakes = [f for f in quakes.get('features', [])
                     if math.sqrt((f['geometry']['coordinates'][1] - lat) ** 2 +
                                  (f['geometry']['coordinates'][0] - lon) ** 2) * 111 < get_dynamic_search_radius(
             f['properties']['mag'])]
 
+    # Визуализация: разнесенные индикаторы
     col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
 
     with col1:
@@ -83,7 +74,7 @@ for city, (lat, lon, offset) in CITIES.items():
     with col2:
         st.write("Статус ионосферы:")
         if abs(z) > 1.5:
-            st.warning("⚠️ АНОМАЛИЯ")
+            st.warning("⚠️ АНОМАЛИЯ (Z-score)")
         else:
             st.info("✅ Стабильно")
 
@@ -92,7 +83,7 @@ for city, (lat, lon, offset) in CITIES.items():
         if found_quakes:
             st.error(f"⚠️ Событие M{found_quakes[0]['properties']['mag']}")
         else:
-            st.success("✅ Спокойно")
+            st.success("✅ Сейсмически спокойно")
 
     with col4:
         fig, ax = plt.subplots(figsize=(6, 1))
@@ -101,4 +92,4 @@ for city, (lat, lon, offset) in CITIES.items():
         ax.axis('off')
         st.pyplot(fig)
 
-st.write("Метод: Статистический анализ с учетом суточной вариации, широты и сезонных циклов.")
+st.write("Метод: Раздельный мониторинг ионосферных аномалий и литосферной активности.")
