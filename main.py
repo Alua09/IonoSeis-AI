@@ -51,14 +51,14 @@ def get_normalized_tec(grid, lat, lon):
     lat_idx = max(0, min(int((lat + 87.5) / 2.5), 70))
     lon_idx = max(0, min(int((lon + 180) / 5.0), 72))
     raw_val = grid[lat_idx, lon_idx]
-    # Нормализация: если значение > 100, делим на 10 (учет scale factor IONEX)
+    # Нормализация для устранения 200+ значений
     return raw_val / 10.0 if raw_val > 100 else raw_val
 
 
 # --- ИНТЕРФЕЙС ---
 if st.button("🚀 ОБНОВИТЬ ВСЕ РЕГИОНЫ"):
     try:
-        with st.spinner("Синхронизация с серверами NASA и USGS..."):
+        with st.spinner("Синхронизация..."):
             setup_auth()
             results = earthaccess.search_data(short_name='GNSS_IGS_AC_ion_VTEC_comp',
                                               temporal=(datetime.now() - timedelta(days=5), datetime.now()), count=1)
@@ -68,8 +68,6 @@ if st.button("🚀 ОБНОВИТЬ ВСЕ РЕГИОНЫ"):
                 grid = parse_upc_ionex(files[0])
                 quakes = requests.get(
                     "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=100").json()
-
-                st.subheader("Плотность ионосферы и сейсмическая активность")
 
                 for city, (c_lat, c_lon) in CITIES.items():
                     st.markdown("---")
@@ -81,10 +79,14 @@ if st.button("🚀 ОБНОВИТЬ ВСЕ РЕГИОНЫ"):
                     with c1:
                         st.metric(f"VTEC", f"{val:.2f} TECU")
                         fig, ax = plt.subplots(figsize=(6, 1.5))
-                        ax.barh(0, val, color='skyblue' if val < 50 else 'red')
+
+                        # ИСПРАВЛЕНИЕ ЦВЕТОВ: Красный если > 50 (аномалия), Голубой если < 50 (норма)
+                        bar_color = 'red' if val > 50 else 'skyblue'
+                        ax.barh(0, val, color=bar_color)
+
                         ax.set_xlim(0, 100)
                         ax.set_xlabel("VTEC (ед. TECU)")
-                        ax.axvline(x=50, color='orange', linestyle='--', alpha=0.6, label='Порог аномалии')
+                        ax.axvline(x=50, color='orange', linestyle='--', alpha=0.6)
                         ax.set_yticks([])
                         st.pyplot(fig)
 
@@ -103,6 +105,6 @@ if st.button("🚀 ОБНОВИТЬ ВСЕ РЕГИОНЫ"):
             else:
                 st.warning("Нет новых данных NASA.")
     except Exception as e:
-        st.error(f"Ошибка системы: {e}")
+        st.error(f"Ошибка: {e}")
 
-st.write("Метод мониторинга основан на японской концепции литосферно-ионосферного сопряжения.")
+st.write("Метод мониторинга основан на литосферно-ионосферном сопряжении.")
