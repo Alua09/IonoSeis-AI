@@ -16,24 +16,21 @@ CITIES = {
 if 'history' not in st.session_state:
     st.session_state.history = {city: [] for city in CITIES}
 
+
 # --- НАУЧНЫЕ ФУНКЦИИ ---
 def get_dynamic_search_radius(mag):
     return 300 * (1.5 ** (mag - 5.0))
 
+
 def get_seasonal_factor(date):
-    """
-    Учитывает сезонные колебания ионосферы.
-    Используем синусоиду: пики плотности около равноденствий (день 80 и 260).
-    """
     day_of_year = date.timetuple().tm_yday
-    # Сезонный множитель от 0.8 (минимум) до 1.2 (максимум)
     return 1.0 + 0.2 * math.sin(2 * math.pi * (day_of_year - 80) / 365)
 
+
 def get_latitude_norm(lat, date):
-    """Базовая норма VTEC с учетом широты и сезона."""
     lat_factor = math.cos(math.radians(lat))
-    seasonal = get_seasonal_factor(date)
-    return (10.0 + 15.0 * lat_factor) * seasonal
+    return (10.0 + 15.0 * lat_factor) * get_seasonal_factor(date)
+
 
 def get_kp_index():
     try:
@@ -42,18 +39,17 @@ def get_kp_index():
     except:
         return 2.0
 
-# --- ИНТЕРФЕЙС ---
-st.title("🛰 IonoSeis AI: Аналитика литосферно-ионосферных корреляций")
 
-if st.button("🔄 ОБНОВИТЬ И ЗАПИСАТЬ ТРЕНД"):
-    st.success("Данные синхронизированы с глобальными узлами.")
+# --- ИНТЕРФЕЙС ---
+st.title("🛰 IonoSeis AI: Экспертный мониторинг")
+
+if st.button("🔄 ОБНОВИТЬ ДАННЫЕ"):
+    st.success("Данные синхронизированы.")
 
 kp = get_kp_index()
 st.sidebar.subheader("🌍 Мониторинг")
 st.sidebar.metric("Глобальный Kp-индекс", kp)
-st.sidebar.write("Режим: **Адаптивный Z-анализ (Сезонный)**")
 
-# Данные USGS
 quakes = requests.get("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=" +
                       (datetime.now() - timedelta(days=1)).isoformat()).json()
 
@@ -61,42 +57,45 @@ for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
     now = datetime.now(timezone.utc) + timedelta(hours=offset)
 
-    # 1. Расчет: региональная норма + сезонная поправка + динамика
+    # 1. Анализ Ионосферы (Независимый)
     base_norm = get_latitude_norm(lat, now)
     val = base_norm + np.random.normal(0, 1.2)
-
-    # 2. Логирование тренда
     st.session_state.history[city].append(val)
     if len(st.session_state.history[city]) > 20: st.session_state.history[city].pop(0)
 
-    # 3. Анализ (Z-score с поправкой на Kp)
-    norm = base_norm + (kp * 1.0)
-    z = (val - norm) / 3.0
+    z = (val - (base_norm + kp * 1.0)) / 3.0
 
-    col1, col2, col3 = st.columns([1, 1, 2])
+    # 2. Поиск событий (Независимый)
+    found_quakes = [f for f in quakes.get('features', [])
+                    if math.sqrt((f['geometry']['coordinates'][1] - lat) ** 2 +
+                                 (f['geometry']['coordinates'][0] - lon) ** 2) * 111 < get_dynamic_search_radius(
+            f['properties']['mag'])]
+
+    # Индикаторы
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
 
     with col1:
         st.subheader(f"📍 {city}")
-        st.caption(f"🕒 {now.strftime('%H:%M')}")
-        st.metric("VTEC (TECU)", f"{val:.1f}", f"{z:.1f}σ")
+        st.metric("VTEC", f"{val:.1f}")
 
     with col2:
-        st.write("Сейсмический статус:")
-        found_quakes = [f for f in quakes.get('features', [])
-                        if math.sqrt((f['geometry']['coordinates'][1] - lat) ** 2 +
-                                     (f['geometry']['coordinates'][0] - lon) ** 2) * 111
-                        < get_dynamic_search_radius(f['properties']['mag'])]
-
-        if found_quakes:
-            st.error(f"⚠️ АКТИВНОСТЬ (M{found_quakes[0]['properties']['mag']})")
+        st.write("Статус ионосферы:")
+        if z > 1.5:
+            st.warning("⚠️ АНОМАЛИЯ (Z-score)")
         else:
-            st.success("✅ В НОРМЕ")
+            st.info("✅ Стабильно")
 
     with col3:
+        st.write("Сейсмическая сводка:")
+        if found_quakes:
+            st.error(f"⚠️ Событие M{found_quakes[0]['properties']['mag']}")
+        else:
+            st.success("✅ Сейсмически спокойно")
+
+    with col4:
         fig, ax = plt.subplots(figsize=(6, 1))
-        ax.plot(st.session_state.history[city], color='cyan', linewidth=2)
-        ax.fill_between(range(len(st.session_state.history[city])), st.session_state.history[city], color='cyan', alpha=0.2)
+        ax.plot(st.session_state.history[city], color='cyan')
         ax.axis('off')
         st.pyplot(fig)
 
-st.write("Метод: Статистический анализ с учетом сезонных циклов (Seasonal Factor) и геомагнитной поправки.")
+st.write("Метод: Раздельный мониторинг ионосферных аномалий и литосферной активности.")
