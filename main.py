@@ -22,7 +22,7 @@ def setup_auth():
 
 
 def parse_ionex_grid():
-    """Создает сетку значений VTEC из файла IONEX"""
+    """Парсер, который игнорирует текстовые заголовки и читает только данные VTEC"""
     grid = np.zeros((71, 73))
     lat_idx = 0
     with open("data.ionex", 'r', errors='ignore') as f:
@@ -30,27 +30,38 @@ def parse_ionex_grid():
         for line in f:
             if 'START OF TEC MAP' in line:
                 in_map = True
-            elif 'END OF TEC MAP' in line:
+                continue
+            if 'END OF TEC MAP' in line:
                 in_map = False
-            elif in_map:
+                continue
+
+            if in_map:
+                # Разбиваем строку и пытаемся найти числа
                 parts = line.split()
-                if len(parts) >= 10:
-                    for lon_idx, p in enumerate(parts):
-                        if lon_idx < 73 and lat_idx < 71:
-                            grid[lat_idx, lon_idx] = float(p) / 10.0
-                    lat_idx += 1
+                # Проверка: если в строке есть хотя бы одно число и нет букв
+                # (IONEX данные - это числа, заголовки содержат метки типа EPOCH)
+                is_data_line = True
+                for p in parts:
+                    # Если часть строки - не число, считаем это заголовком
+                    if not p.replace('.', '', 1).replace('-', '', 1).isdigit():
+                        is_data_line = False
+                        break
+
+                if is_data_line and len(parts) > 5:
+                    if lat_idx < 71:
+                        for lon_idx, p in enumerate(parts):
+                            if lon_idx < 73:
+                                grid[lat_idx, lon_idx] = float(p) / 10.0
+                        lat_idx += 1
     return grid
 
 
 def get_interp_tec(grid, lat, lon):
-    """Билинейная интерполяция для плавных данных между городами"""
     lat_f = (lat + 87.5) / 2.5
     lon_f = (lon + 180) / 5.0
     x, y = int(lat_f), int(lon_f)
     x1, y1 = min(x, 70), min(y, 72)
     x2, y2 = min(x + 1, 70), min(y + 1, 72)
-
-    # Веса интерполяции
     dx, dy = lat_f - x, lon_f - y
     val = (1 - dx) * (1 - dy) * grid[x1, y1] + dx * (1 - dy) * grid[x2, y1] + (1 - dx) * dy * grid[x1, y2] + dx * dy * \
           grid[x2, y2]
@@ -59,7 +70,7 @@ def get_interp_tec(grid, lat, lon):
 
 if st.button("📊 ЗАПУСК АНАЛИЗА ИОНОСФЕРЫ"):
     try:
-        with st.spinner("Синхронизация с IGS..."):
+        with st.spinner("Синхронизация данных..."):
             setup_auth()
             results = earthaccess.search_data(short_name='GNSS_IGS_AC_ion_VTEC_comp',
                                               temporal=(datetime.now() - timedelta(days=5), datetime.now()))
@@ -99,6 +110,6 @@ if st.button("📊 ЗАПУСК АНАЛИЗА ИОНОСФЕРЫ"):
             else:
                 st.warning("Нет данных.")
     except Exception as e:
-        st.error(f"Ошибка: {e}")
+        st.error(f"Ошибка парсинга: {e}")
 
 st.write("Метод использует билинейную интерполяцию сетки IONEX для высокоточной оценки VTEC.")
