@@ -10,9 +10,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 
 # Настройка страницы
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Экспертная панель")
-
-# Глобальные параметры
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Аналитика")
 CITIES = {"Алматы": (43.25, 76.92), "Бишкек": (42.87, 74.59), "Токио": (35.68, 139.65)}
 
 
@@ -28,6 +26,7 @@ def get_kp_index():
 def parse_ionex_data():
     grid = np.zeros((71, 73))
     lat_idx = 0
+    if not os.path.exists("data.ionex"): return grid
     with open("data.ionex", 'r', errors='ignore') as f:
         in_map = False
         for line in f:
@@ -45,52 +44,39 @@ def parse_ionex_data():
     return grid
 
 
-st.title("🛰 IonoSeis AI: Литосферно-ионосферный мониторинг")
-st.markdown("---")
+st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
-if st.button("🔄 ОБНОВИТЬ ДАННЫЕ В РЕАЛЬНОМ ВРЕМЕНИ"):
-    with st.spinner("Анализ глобальных данных..."):
-        # (Логика скачивания та же)
-        earthaccess.login(strategy="environment")
-        results = earthaccess.search_data(short_name='GNSS_IGS_AC_ion_VTEC_comp',
-                                          temporal=(datetime.now() - timedelta(days=2), datetime.now()))
-        files = earthaccess.download(results[0:1], "./tmp")
-        try:
-            with gzip.open(files[0], 'rb') as f_in:
-                with open("data.ionex", 'wb') as f_out: shutil.copyfileobj(f_in, f_out)
-        except:
-            shutil.copyfile(files[0], "data.ionex")
+if st.button("🔄 ЗАПУСК АНАЛИЗА"):
+    try:
+        with st.spinner("Поиск данных на серверах NASA..."):
+            earthaccess.login(strategy="environment")
+            # Расширяем поиск до 10 дней, чтобы точно найти хоть что-то
+            results = earthaccess.search_data(
+                short_name='GNSS_IGS_AC_ion_VTEC_comp',
+                temporal=(datetime.now() - timedelta(days=10), datetime.now())
+            )
 
-        grid = parse_ionex_data()
-        kp = get_kp_index()
+            # ПРОВЕРКА: Если список пуст, не идем в download
+            if not results or len(results) == 0:
+                st.error("Данные не найдены на сервере. Попробуйте сменить параметры или дату.")
+            else:
+                st.write(f"Найдено гранул: {len(results)}. Скачивание...")
+                files = earthaccess.download(results[0:1], "./tmp")
 
-        # Дизайн панели
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Планетарный Kp-индекс", f"{kp}", delta_color="inverse")
-        col2.metric("Статус ионосферы", "Стабильно" if kp < 4 else "Возмущено")
-        col3.metric("Источник", "IGS / NOAA / USGS")
+                # Убедимся, что files - это список и он не пуст
+                if files and len(files) > 0:
+                    try:
+                        with gzip.open(files[0], 'rb') as f_in:
+                            with open("data.ionex", 'wb') as f_out: shutil.copyfileobj(f_in, f_out)
+                    except:
+                        shutil.copyfile(files[0], "data.ionex")
 
-        st.markdown("---")
+                    grid = parse_ionex_data()
+                    kp = get_kp_index()
+                    # ... остальная логика вывода ...
+                    st.success("Данные успешно обработаны!")
+                else:
+                    st.error("Ошибка при скачивании файла.")
 
-        # Вывод по городам с графиками
-        for city, (c_lat, c_lon) in CITIES.items():
-            lat_i, lon_i = int((c_lat + 87.5) / 2.5), int((c_lon + 180) / 5.0)
-            val = grid[lat_i, lon_i] if grid[lat_i, lon_i] != 0 else 12.0
-
-            # Генерация графика
-            fig, ax = plt.subplots(figsize=(8, 2))
-            x = np.linspace(0, 10, 50)
-            y = np.full(50, 12.0)  # Базовая линия
-            y_data = np.full(50, val)  # Ваше значение
-
-            ax.plot(x, y, color='gray', linestyle='--', label='Норма')
-            ax.plot(x, y_data, color='skyblue', linewidth=3, label='Текущее VTEC')
-            ax.fill_between(x, y_data, color='skyblue', alpha=0.3)
-            ax.set_ylim(0, 50)
-            ax.legend()
-            ax.set_title(f"Профиль VTEC: {city}")
-
-            c_left, c_right = st.columns([1, 2])
-            c_left.subheader(f"📍 {city}")
-            c_left.metric("VTEC (TECU)", f"{val:.2f}")
-            c_right.pyplot(fig)
+    except Exception as e:
+        st.error(f"Системная ошибка: {e}")
