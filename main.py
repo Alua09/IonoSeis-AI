@@ -21,12 +21,11 @@ def setup_auth():
     return earthaccess.login(strategy="environment")
 
 
-def parse_ionex_manual():
-    """Чтение текстового формата IONEX (INX)"""
-    data = []
+def parse_ionex_grid():
+    """Создает сетку значений VTEC из файла IONEX"""
+    grid = np.zeros((71, 73))
+    lat_idx = 0
     with open("data.ionex", 'r', errors='ignore') as f:
-        # IONEX содержит блоки данных. Нам нужны значения TEC.
-        # В формате IGS они всегда следуют за меткой 'START OF TEC MAP'
         in_map = False
         for line in f:
             if 'START OF TEC MAP' in line:
@@ -34,33 +33,43 @@ def parse_ionex_manual():
             elif 'END OF TEC MAP' in line:
                 in_map = False
             elif in_map:
-                # В строках данных IONEX числа идут группами.
-                # Берем все числа в строке, если они похожи на данные (от 0 до 500)
                 parts = line.split()
-                for p in parts:
-                    try:
-                        val = float(p)
-                        if 0 < val < 500: data.append(val / 10.0)
-                    except:
-                        continue
-    return data
+                if len(parts) >= 10:
+                    for lon_idx, p in enumerate(parts):
+                        if lon_idx < 73 and lat_idx < 71:
+                            grid[lat_idx, lon_idx] = float(p) / 10.0
+                    lat_idx += 1
+    return grid
+
+
+def get_interp_tec(grid, lat, lon):
+    """Билинейная интерполяция для плавных данных между городами"""
+    lat_f = (lat + 87.5) / 2.5
+    lon_f = (lon + 180) / 5.0
+    x, y = int(lat_f), int(lon_f)
+    x1, y1 = min(x, 70), min(y, 72)
+    x2, y2 = min(x + 1, 70), min(y + 1, 72)
+
+    # Веса интерполяции
+    dx, dy = lat_f - x, lon_f - y
+    val = (1 - dx) * (1 - dy) * grid[x1, y1] + dx * (1 - dy) * grid[x2, y1] + (1 - dx) * dy * grid[x1, y2] + dx * dy * \
+          grid[x2, y2]
+    return val
 
 
 if st.button("📊 ЗАПУСК АНАЛИЗА ИОНОСФЕРЫ"):
     try:
-        with st.spinner("Обработка данных IONEX..."):
+        with st.spinner("Синхронизация с IGS..."):
             setup_auth()
             results = earthaccess.search_data(short_name='GNSS_IGS_AC_ion_VTEC_comp',
                                               temporal=(datetime.now() - timedelta(days=5), datetime.now()))
             if results:
                 files = earthaccess.download(results[0:1], "./tmp")
-                # Распаковка через gzip
                 with gzip.open(files[0], 'rb') as f_in:
                     with open("data.ionex", 'wb') as f_out: shutil.copyfileobj(f_in, f_out)
 
-                vtec_values = parse_ionex_manual()
+                grid = parse_ionex_grid()
 
-                # Запрос событий
                 start_time = (datetime.now() - timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%S')
                 quakes = requests.get(
                     f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={start_time}").json()
@@ -68,15 +77,11 @@ if st.button("📊 ЗАПУСК АНАЛИЗА ИОНОСФЕРЫ"):
                 for city, (c_lat, c_lon) in CITIES.items():
                     st.markdown("---")
                     st.subheader(f"📍 {city}")
-
-                    # Берем случайное значение из массива, если массив заполнен,
-                    # чтобы имитировать гео-распределение без ошибки индекса
-                    idx = (int(c_lat) + int(c_lon)) % len(vtec_values) if vtec_values else 0
-                    val = vtec_values[idx] if vtec_values else 22.0
+                    val = get_interp_tec(grid, c_lat, c_lon)
 
                     c1, c2 = st.columns([1, 2])
                     with c1:
-                        st.metric("VTEC (TECU)", f"{val:.1f}")
+                        st.metric("VTEC (TECU)", f"{val:.2f}")
                         fig, ax = plt.subplots(figsize=(6, 1))
                         ax.barh(0, val, color='red' if val > 30 else 'skyblue')
                         ax.set_xlim(0, 100)
@@ -94,4 +99,6 @@ if st.button("📊 ЗАПУСК АНАЛИЗА ИОНОСФЕРЫ"):
             else:
                 st.warning("Нет данных.")
     except Exception as e:
-        st.error(f"Ошибка парсинга: {e}")
+        st.error(f"Ошибка: {e}")
+
+st.write("Метод использует билинейную интерполяцию сетки IONEX для высокоточной оценки VTEC.")
