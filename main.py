@@ -9,7 +9,7 @@ import os
 import pandas as pd
 from datetime import datetime, timedelta
 
-# Настройка
+# Настройка страницы
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Аналитика")
 st.title("🛰 IonoSeis AI: Мониторинг ионосферы и сейсмики")
 
@@ -38,7 +38,7 @@ def parse_upc_ionex(file_path):
                 in_block = True
             elif 'END OF TEC MAP' in line:
                 in_block = False
-            elif in_block and not any(x in line for x in ['LAT/LON', 'EPOCH']):
+            elif in_block and not any(x in line for x in ['LAT/LON', 'EPOCH', 'START', 'END']):
                 for p in line.split():
                     try:
                         val = float(p); tec.append(val if val < 9000 else 0)
@@ -47,10 +47,18 @@ def parse_upc_ionex(file_path):
     return np.array(tec[:5183]).reshape((71, 73))
 
 
+def get_normalized_tec(grid, lat, lon):
+    lat_idx = max(0, min(int((lat + 87.5) / 2.5), 70))
+    lon_idx = max(0, min(int((lon + 180) / 5.0), 72))
+    raw_val = grid[lat_idx, lon_idx]
+    # Нормализация: если значение > 100, делим на 10 (учет scale factor IONEX)
+    return raw_val / 10.0 if raw_val > 100 else raw_val
+
+
 # --- ИНТЕРФЕЙС ---
 if st.button("🚀 ОБНОВИТЬ ВСЕ РЕГИОНЫ"):
     try:
-        with st.spinner("Синхронизация..."):
+        with st.spinner("Синхронизация с серверами NASA и USGS..."):
             setup_auth()
             results = earthaccess.search_data(short_name='GNSS_IGS_AC_ion_VTEC_comp',
                                               temporal=(datetime.now() - timedelta(days=5), datetime.now()), count=1)
@@ -58,30 +66,28 @@ if st.button("🚀 ОБНОВИТЬ ВСЕ РЕГИОНЫ"):
             if results:
                 files = earthaccess.download(results, "./tmp")
                 grid = parse_upc_ionex(files[0])
-
-                # Загружаем все землетрясения один раз
                 quakes = requests.get(
                     "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=100").json()
 
-                st.subheader("Плотность ионосферы и Сейсмика по регионам")
+                st.subheader("Плотность ионосферы и сейсмическая активность")
 
                 for city, (c_lat, c_lon) in CITIES.items():
                     st.markdown("---")
-                    st.subheader(f"📍 Мониторинг: {city}")
+                    st.subheader(f"📍 Регион: {city}")
 
-                    # 1. VTEC
-                    lat_idx, lon_idx = int((c_lat + 87.5) / 2.5), int((c_lon + 180) / 5)
-                    val = grid[max(0, min(lat_idx, 70)), max(0, min(lon_idx, 72))]
+                    val = get_normalized_tec(grid, c_lat, c_lon)
 
                     c1, c2 = st.columns([1, 2])
                     with c1:
                         st.metric(f"VTEC", f"{val:.2f} TECU")
-                        fig, ax = plt.subplots(figsize=(6, 1))
-                        ax.barh(0, val, color='skyblue' if val < 80 else 'red')
-                        ax.set_xlim(0, 150)
+                        fig, ax = plt.subplots(figsize=(6, 1.5))
+                        ax.barh(0, val, color='skyblue' if val < 50 else 'red')
+                        ax.set_xlim(0, 100)
+                        ax.set_xlabel("VTEC (ед. TECU)")
+                        ax.axvline(x=50, color='orange', linestyle='--', alpha=0.6, label='Порог аномалии')
+                        ax.set_yticks([])
                         st.pyplot(fig)
 
-                    # 2. Сейсмика для этого города
                     with c2:
                         local_q = []
                         for f in quakes['features']:
@@ -97,4 +103,6 @@ if st.button("🚀 ОБНОВИТЬ ВСЕ РЕГИОНЫ"):
             else:
                 st.warning("Нет новых данных NASA.")
     except Exception as e:
-        st.error(f"Ошибка: {e}")
+        st.error(f"Ошибка системы: {e}")
+
+st.write("Метод мониторинга основан на японской концепции литосферно-ионосферного сопряжения.")
