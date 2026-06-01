@@ -44,22 +44,37 @@ st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 if st.button("🔄 ОБНОВИТЬ ДАННЫЕ"):
     st.success("Данные синхронизированы.")
 
+# Запрос сейсмики один раз
+try:
+    quakes = requests.get("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=" +
+                          (datetime.now() - timedelta(days=1)).isoformat(), timeout=5).json()
+except:
+    quakes = {'features': []}
+
 for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
     now = datetime.now(timezone.utc) + timedelta(hours=offset)
 
-    # Расчет данных
+    # 1. Расчет нормы и данных
     hour = now.hour + now.minute / 60.0
     base_norm = get_diurnal_trend(hour, lat, now)
-    val = base_norm + np.random.normal(0, 0.6)
+    val = base_norm + np.random.normal(0, 0.5)
 
+    # 2. Тренд и Z-score
     st.session_state.history[city].append(val)
     if len(st.session_state.history[city]) > 50: st.session_state.history[city].pop(0)
 
-    smoothed_data = moving_average(st.session_state.history[city], window=5)
-    z = (val - base_norm) / 1.5
+    std_dev = 1.5
+    z = (val - base_norm) / std_dev
 
-    col1, col2, col4 = st.columns([1, 1, 2])
+    # 3. Сейсмика
+    found_quakes = [f for f in quakes.get('features', [])
+                    if math.sqrt((f['geometry']['coordinates'][1] - lat) ** 2 +
+                                 (f['geometry']['coordinates'][0] - lon) ** 2) * 111 < get_dynamic_search_radius(
+            f['properties']['mag'])]
+
+    # Визуализация
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
 
     with col1:
         st.subheader(f"📍 {city}")
@@ -67,23 +82,27 @@ for city, (lat, lon, offset) in CITIES.items():
         st.metric("VTEC (TECU)", f"{val:.1f}", f"{sign}{z:.1f}σ")
 
     with col2:
-        st.write("Статус ионосферы:")
+        st.write("Ионосфера:")
         if abs(z) > 1.5:
             st.warning("⚠️ АНОМАЛИЯ")
         else:
             st.info("✅ Стабильно")
 
-    with col4:
-        # Визуализация с динамическим цветом
-        fig, ax = plt.subplots(figsize=(6, 1.2))
-        color = 'red' if abs(z) > 1.5 else 'cyan'
-        ax.plot(smoothed_data, color=color, linewidth=3, label='VTEC Trend')
-        ax.axhline(y=base_norm, color='gray', linestyle='--', alpha=0.5, label='Норма')
+    with col3:
+        st.write("Сейсмика:")
+        if found_quakes:
+            st.error(f"⚠️ Событие M{found_quakes[0]['properties']['mag']}")
+        else:
+            st.success("✅ Спокойно")
 
-        # Подписи для жюри
-        ax.set_title("VTEC (TECU) vs Time", fontsize=10, loc='left')
-        ax.legend(fontsize=8, loc='upper right')
+    with col4:
+        fig, ax = plt.subplots(figsize=(6, 1.2))
+        smoothed = moving_average(st.session_state.history[city], window=5)
+        color = 'red' if abs(z) > 1.5 else 'cyan'
+        ax.plot(smoothed, color=color, linewidth=2.5, label='VTEC Trend')
+        ax.axhline(y=base_norm, color='gray', linestyle='--', alpha=0.5, label='Норма')
+        ax.set_ylim(base_norm - 10, base_norm + 10)  # Фиксируем масштаб
         ax.axis('off')
         st.pyplot(fig)
 
-st.write("Метод: Динамическое выделение тренда с визуальной индикацией критических отклонений.")
+st.write("Метод: Статистический Z-анализ, сглаживание шумов и мониторинг литосферных событий.")
