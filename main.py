@@ -13,7 +13,6 @@ from datetime import datetime, timedelta
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Аналитика")
 st.title("🛰 IonoSeis AI: Мониторинг ионосферы и сейсмики")
 
-# Координаты для мониторинга
 CITIES = {
     "Алматы": (43.25, 76.92),
     "Бишкек": (42.87, 74.59),
@@ -21,6 +20,7 @@ CITIES = {
 }
 
 
+# --- ФУНКЦИИ ---
 def setup_auth():
     os.environ['EARTHDATA_USERNAME'] = st.secrets['EARTHDATA_USERNAME']
     os.environ['EARTHDATA_PASSWORD'] = st.secrets['EARTHDATA_PASSWORD']
@@ -48,9 +48,9 @@ def parse_upc_ionex(file_path):
 
 
 # --- ИНТЕРФЕЙС ---
-if st.button("🚀 ОБНОВИТЬ ДАННЫЕ"):
+if st.button("🚀 ОБНОВИТЬ ВСЕ РЕГИОНЫ"):
     try:
-        with st.spinner("Синхронизация с серверами..."):
+        with st.spinner("Синхронизация..."):
             setup_auth()
             results = earthaccess.search_data(short_name='GNSS_IGS_AC_ion_VTEC_comp',
                                               temporal=(datetime.now() - timedelta(days=5), datetime.now()), count=1)
@@ -59,35 +59,41 @@ if st.button("🚀 ОБНОВИТЬ ДАННЫЕ"):
                 files = earthaccess.download(results, "./tmp")
                 grid = parse_upc_ionex(files[0])
 
-                # 1. СЕКЦИЯ: VTEC по городам (Тот самый ваш график)
-                st.subheader("Плотность ионосферы (VTEC) в регионах")
-                cols = st.columns(3)
-                for i, (city, (lat, lon)) in enumerate(CITIES.items()):
-                    lat_idx, lon_idx = int((lat + 87.5) / 2.5), int((lon + 180) / 5)
+                # Загружаем все землетрясения один раз
+                quakes = requests.get(
+                    "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=100").json()
+
+                st.subheader("Плотность ионосферы и Сейсмика по регионам")
+
+                for city, (c_lat, c_lon) in CITIES.items():
+                    st.markdown("---")
+                    st.subheader(f"📍 Мониторинг: {city}")
+
+                    # 1. VTEC
+                    lat_idx, lon_idx = int((c_lat + 87.5) / 2.5), int((c_lon + 180) / 5)
                     val = grid[max(0, min(lat_idx, 70)), max(0, min(lon_idx, 72))]
 
-                    with cols[i]:
-                        st.metric(f"VTEC: {city}", f"{val:.2f} TECU")
-                        fig, ax = plt.subplots(figsize=(8, 1.5))
+                    c1, c2 = st.columns([1, 2])
+                    with c1:
+                        st.metric(f"VTEC", f"{val:.2f} TECU")
+                        fig, ax = plt.subplots(figsize=(6, 1))
                         ax.barh(0, val, color='skyblue' if val < 80 else 'red')
                         ax.set_xlim(0, 150)
-                        ax.set_title(f"Уровень {city}")
                         st.pyplot(fig)
 
-                # 2. СЕКЦИЯ: Сейсмика USGS
-                st.subheader("Сейсмическая активность (USGS)")
-                quakes = requests.get("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=50").json()
-                local_quakes = []
-                for f in quakes['features']:
-                    lon, lat = f['geometry']['coordinates'][:2]
-                    dist = ((lat - 43.25) ** 2 + (lon - 76.92) ** 2) ** 0.5 * 111
-                    if dist < 1500 and f['properties']['mag'] > 3.0:
-                        local_quakes.append({'place': f['properties']['place'], 'mag': f['properties']['mag']})
+                    # 2. Сейсмика для этого города
+                    with c2:
+                        local_q = []
+                        for f in quakes['features']:
+                            lon, lat = f['geometry']['coordinates'][:2]
+                            dist = ((lat - c_lat) ** 2 + (lon - c_lon) ** 2) ** 0.5 * 111
+                            if dist < 1500 and f['properties']['mag'] > 3.0:
+                                local_q.append({'place': f['properties']['place'], 'mag': f['properties']['mag']})
 
-                if local_quakes:
-                    st.bar_chart(pd.DataFrame(local_quakes).set_index('place')['mag'])
-                else:
-                    st.info("Спокойно: в радиусе 1500 км событий > 3.0 нет.")
+                        if local_q:
+                            st.bar_chart(pd.DataFrame(local_q).set_index('place')['mag'])
+                        else:
+                            st.info(f"Спокойно: в радиусе 1500 км от {city} событий > 3.0 нет.")
             else:
                 st.warning("Нет новых данных NASA.")
     except Exception as e:
