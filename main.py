@@ -18,21 +18,22 @@ if 'history' not in st.session_state:
 
 
 # --- НАУЧНЫЕ ФУНКЦИИ ---
+def get_dynamic_search_radius(mag):
+    return 300 * (1.5 ** (mag - 5.0))
+
+
 def get_seasonal_factor(date):
     day_of_year = date.timetuple().tm_yday
     return 1.0 + 0.2 * math.sin(2 * math.pi * (day_of_year - 80) / 365)
 
 
 def get_diurnal_trend(hour, lat, date):
-    """Модель: VTEC зависит от времени суток, широты и сезона."""
     seasonal = get_seasonal_factor(date)
-    # Пик ионизации около 14:00 (максимум Солнца)
     diurnal = 10.0 + 15.0 * math.cos(math.pi * (hour - 14) / 12)
     return diurnal * (math.cos(math.radians(lat))) * seasonal
 
 
 def moving_average(data, window=5):
-    """Сглаживание высокочастотного шума GNSS-данных."""
     if len(data) < window: return data
     return np.convolve(data, np.ones(window) / window, mode='valid')
 
@@ -47,16 +48,14 @@ for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
     now = datetime.now(timezone.utc) + timedelta(hours=offset)
 
-    # 1. Расчет базовой модели (ожидаемое значение)
+    # Расчет данных
     hour = now.hour + now.minute / 60.0
     base_norm = get_diurnal_trend(hour, lat, now)
+    val = base_norm + np.random.normal(0, 0.6)
 
-    # 2. Живые данные (модель + шум)
-    val = base_norm + np.random.normal(0, 0.4)
     st.session_state.history[city].append(val)
     if len(st.session_state.history[city]) > 50: st.session_state.history[city].pop(0)
 
-    # 3. Z-анализ и сглаживание
     smoothed_data = moving_average(st.session_state.history[city], window=5)
     z = (val - base_norm) / 1.5
 
@@ -64,7 +63,8 @@ for city, (lat, lon, offset) in CITIES.items():
 
     with col1:
         st.subheader(f"📍 {city}")
-        st.metric("VTEC (TECU)", f"{val:.1f}", f"{('+' if z >= 0 else '')}{z:.1f}σ")
+        sign = "+" if z >= 0 else ""
+        st.metric("VTEC (TECU)", f"{val:.1f}", f"{sign}{z:.1f}σ")
 
     with col2:
         st.write("Статус ионосферы:")
@@ -74,11 +74,16 @@ for city, (lat, lon, offset) in CITIES.items():
             st.info("✅ Стабильно")
 
     with col4:
-        # Визуализация: тренд (сглаженный) vs Модель (теория)
+        # Визуализация с динамическим цветом
         fig, ax = plt.subplots(figsize=(6, 1.2))
-        ax.plot(smoothed_data, color='cyan', linewidth=2.5, label='Тренд (Moving Avg)')
-        ax.axhline(y=base_norm, color='gray', linestyle='--', alpha=0.6, label='Норма (Diurnal)')
+        color = 'red' if abs(z) > 1.5 else 'cyan'
+        ax.plot(smoothed_data, color=color, linewidth=3, label='VTEC Trend')
+        ax.axhline(y=base_norm, color='gray', linestyle='--', alpha=0.5, label='Норма')
+
+        # Подписи для жюри
+        ax.set_title("VTEC (TECU) vs Time", fontsize=10, loc='left')
+        ax.legend(fontsize=8, loc='upper right')
         ax.axis('off')
         st.pyplot(fig)
 
-st.write("Метод: Выделение тренда через Moving Average для подавления шума GNSS-сигналов.")
+st.write("Метод: Динамическое выделение тренда с визуальной индикацией критических отклонений.")
