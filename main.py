@@ -25,26 +25,40 @@ def get_kp_index():
 
 
 def get_ionex_data():
-    # Пробуем вчерашнюю дату, так как данные за текущие сутки могут быть не готовы
-    target_date = datetime.now() - timedelta(days=1)
-    day = target_date.strftime("%j")
-    year = target_date.strftime("%y")
-    url = f"https://cddis.nasa.gov/archive/gnss/products/ionex/{target_date.year}/{day}/coDG{day}0.{year}i.gz"
+    now = datetime.now()
+    day = now.strftime("%j")
+    year = now.strftime("%y")
+    url = f"https://cddis.nasa.gov/archive/gnss/products/ionex/{now.year}/{day}/coDG{day}0.{year}i.gz"
 
-    # Использование Session для сохранения авторизации
     session = requests.Session()
-    session.auth = (st.secrets["EARTHDATA_USERNAME"], st.secrets["EARTHDATA_PASSWORD"])
 
+    # 1. Сначала "заходим" на страницу авторизации, чтобы получить сессию
+    auth_url = "https://urs.earthdata.nasa.gov/"
+    session.get(auth_url, headers=HEADERS)
+
+    # 2. Выполняем POST-запрос с логином и паролем
+    # Это имитирует нажатие кнопки "Log in"
+    login_data = {
+        'username': st.secrets["EARTHDATA_USERNAME"],
+        'password': st.secrets["EARTHDATA_PASSWORD"],
+        'client_id': 'gDQnv1IO0j9O2xXdwS8KMQ',
+        'redirect_uri': 'https://cddis.nasa.gov/proxyauth',
+        'response_type': 'code',
+        'stay_in': '1'
+    }
+    session.post("https://urs.earthdata.nasa.gov/login", data=login_data, headers=HEADERS)
+
+    # 3. Теперь запрашиваем сам файл
     response = session.get(url, headers=HEADERS, timeout=30)
 
-    if response.status_code == 200 and response.content.startswith(b'\x1f\x8b'):
+    # ПРОВЕРКА: Если размер файла больше 1000 байт и он начинается с Gzip-магии
+    if response.status_code == 200 and len(response.content) > 1000 and response.content.startswith(b'\x1f\x8b'):
         with open("data.ionex.gz", "wb") as f:
             f.write(response.content)
         return "data.ionex.gz"
     else:
-        st.error(f"Ошибка загрузки (Код: {response.status_code}). Убедитесь, что логин/пароль верны.")
+        st.error(f"NASA ответило, но файл не найден или доступ закрыт. Размер ответа: {len(response.content)} байт.")
         return None
-
 
 def parse_ionex(file_path):
     with gzip.open(file_path, 'rb') as f_in:
