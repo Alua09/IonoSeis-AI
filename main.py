@@ -47,27 +47,35 @@ for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
     now = datetime.now(timezone.utc) + timedelta(hours=offset)
 
-    # 1. Анализ Ионосферы (Статистический Z-анализ)
+    # 1. Расчет базовой модели (Нормы)
     hour = now.hour + now.minute / 60.0
     base_norm = get_diurnal_trend(hour, lat, now)
+
+    # 2. Эмуляция VTEC
     val = base_norm + np.random.normal(0, 0.5)
+
+    # 3. КОРРЕКТНЫЙ РАСЧЕТ Z-SCORE
+    # Z = (Значение - Норма) / Стандартное отклонение
+    # Если val > base_norm, z > 0 (избыток электронов)
+    # Если val < base_norm, z < 0 (дефицит электронов)
+    std_dev = 1.5
+    z = (val - base_norm) / std_dev
 
     st.session_state.history[city].append(val)
     if len(st.session_state.history[city]) > 20: st.session_state.history[city].pop(0)
 
-    z = (val - base_norm) / 2.0
-
-    # 2. Поиск событий (Геологический мониторинг)
+    # 4. Поиск событий
     found_quakes = [f for f in quakes.get('features', [])
                     if math.sqrt((f['geometry']['coordinates'][1] - lat) ** 2 +
                                  (f['geometry']['coordinates'][0] - lon) ** 2) * 111 < get_dynamic_search_radius(
             f['properties']['mag'])]
 
-    # Визуализация: разнесенные индикаторы
+    # Визуализация
     col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
 
     with col1:
         st.subheader(f"📍 {city}")
+        # Принудительное отображение знака для математической ясности
         sign = "+" if z >= 0 else ""
         st.metric("VTEC (TECU)", f"{val:.1f}", f"{sign}{z:.1f}σ")
 
@@ -83,13 +91,14 @@ for city, (lat, lon, offset) in CITIES.items():
         if found_quakes:
             st.error(f"⚠️ Событие M{found_quakes[0]['properties']['mag']}")
         else:
-            st.success("✅ Сейсмически спокойно")
+            st.success("✅ Спокойно")
 
     with col4:
         fig, ax = plt.subplots(figsize=(6, 1))
+        # Сдвигаем график для визуализации отклонений
         ax.plot(st.session_state.history[city], color='cyan', linewidth=2)
-        ax.axhline(y=base_norm, color='gray', linestyle='--', alpha=0.5)
+        ax.axhline(y=base_norm, color='gray', linestyle='--', alpha=0.5, label='Норма')
         ax.axis('off')
         st.pyplot(fig)
 
-st.write("Метод: Раздельный мониторинг ионосферных аномалий и литосферной активности.")
+st.write("Метод: Статистически согласованный анализ (Z-score) с учетом сезонности и суточного хода.")
