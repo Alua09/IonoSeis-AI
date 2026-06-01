@@ -7,10 +7,9 @@ import gzip
 import shutil
 import os
 import pandas as pd
-import tarfile
 from datetime import datetime, timedelta
 
-# Настройка
+# Настройка страницы
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Аналитика")
 st.title("🛰 IonoSeis AI: Литосферно-ионосферный мониторинг")
 
@@ -20,6 +19,7 @@ if 'prev_tec' not in st.session_state:
     st.session_state.prev_tec = {city: 0.0 for city in CITIES}
 
 
+# --- ФУНКЦИИ ---
 def setup_auth():
     os.environ['EARTHDATA_USERNAME'] = st.secrets['EARTHDATA_USERNAME']
     os.environ['EARTHDATA_PASSWORD'] = st.secrets['EARTHDATA_PASSWORD']
@@ -27,13 +27,10 @@ def setup_auth():
 
 
 def safe_extract(file_path):
-    """Универсальная распаковка, обрабатывающая ошибки формата"""
     try:
-        # Пытаемся стандартным gzip
         with gzip.open(file_path, 'rb') as f_in:
             with open("data.ionex", 'wb') as f_out: shutil.copyfileobj(f_in, f_out)
     except:
-        # Если gzip не сработал, пробуем как обычный файл (иногда они уже распакованы)
         shutil.copyfile(file_path, "data.ionex")
 
 
@@ -46,12 +43,18 @@ def parse_upc_ionex():
                 in_block = True
             elif 'END OF TEC MAP' in line:
                 in_block = False
-            elif in_block and not any(x in line for x in ['LAT/LON', 'EPOCH', 'START', 'END']):
+            elif in_block:
                 for p in line.split():
                     try:
-                        val = float(p); tec.append(val if val < 9000 else 0)
+                        if len(p) > 2 and p.replace('.', '', 1).replace('-', '', 1).isdigit():
+                            val = float(p)
+                            tec.append(val if val < 9000 else 0)
                     except:
                         continue
+
+    # Защита от ошибки reshape
+    if len(tec) < 5183:
+        tec = tec + [0.0] * (5183 - len(tec))
     return np.array(tec[:5183]).reshape((71, 73))
 
 
@@ -62,7 +65,7 @@ def get_normalized_tec(grid, lat, lon):
     return raw_val / 10.0 if raw_val > 100 else raw_val
 
 
-# Профессиональное название кнопки
+# --- ИНТЕРФЕЙС ---
 if st.button("📊 ЗАПУСК АНАЛИЗА ТЕКУЩЕГО СОСТОЯНИЯ ИОНОСФЕРЫ"):
     try:
         with st.spinner("Синхронизация с геофизическими узлами..."):
@@ -77,7 +80,7 @@ if st.button("📊 ЗАПУСК АНАЛИЗА ТЕКУЩЕГО СОСТОЯНИ
                              reverse=True)
                 files = earthaccess.download(results[0:1], "./tmp")
 
-                safe_extract(files[0])  # Используем новую функцию
+                safe_extract(files[0])
                 grid = parse_upc_ionex()
 
                 start_time = (datetime.now() - timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%S')
@@ -111,7 +114,7 @@ if st.button("📊 ЗАПУСК АНАЛИЗА ТЕКУЩЕГО СОСТОЯНИ
                         else:
                             st.info(f"Статус: Геофизический покой (в радиусе 1500 км нет событий > 3.0).")
             else:
-                st.warning("Данные IONEX временно отсутствуют.")
+                st.warning("Данные IONEX временно отсутствуют на сервере.")
     except Exception as e:
         st.error(f"Системная ошибка: {e}")
 
