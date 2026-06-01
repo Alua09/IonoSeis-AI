@@ -8,7 +8,6 @@ from datetime import datetime, timezone, timedelta
 # --- КОНФИГУРАЦИЯ ---
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Dashboard")
 
-# CITIES: (lat, lon, offset_hours)
 CITIES = {
     "Алматы": (43.25, 76.92, 5),
     "Бишкек": (42.87, 74.59, 6),
@@ -20,6 +19,15 @@ if 'history' not in st.session_state:
 
 
 # --- НАУЧНЫЕ ФУНКЦИИ ---
+def get_current_kp_index():
+    """Получение реального Kp-индекса с сервиса NOAA."""
+    try:
+        resp = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
+        return float(resp[-1][1])
+    except:
+        return 2.0
+
+
 def get_dynamic_search_radius(mag):
     return 300 * (1.5 ** (mag - 5.0))
 
@@ -30,7 +38,6 @@ def get_seasonal_factor(date):
 
 
 def get_diurnal_trend(hour, lat, date):
-    """Теоретическая норма (серая линия)"""
     seasonal = get_seasonal_factor(date)
     diurnal = 10.0 + 15.0 * math.cos(math.pi * (hour - 14) / 12)
     return diurnal * (math.cos(math.radians(lat))) * seasonal
@@ -44,10 +51,14 @@ def moving_average(data, window=5):
 # --- ИНТЕРФЕЙС ---
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
-if st.button("🔄 ОБНОВИТЬ ДАННЫЕ"):
-    st.success("Данные синхронизированы.")
+kp = get_current_kp_index()
+kp_status = "⚠️ Повышен" if kp > 4 else "✅ Спокойно"
+st.info(f"🌐 Глобальный геомагнитный индекс (Kp): **{kp}** | Состояние: {kp_status}")
 
-# Сейсмика
+if st.button("🔄 ОБНОВИТЬ ДАННЫЕ"):
+    st.rerun()
+
+# Сейсмика (USGS)
 try:
     quakes = requests.get("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=" +
                           (datetime.now() - timedelta(days=1)).isoformat(), timeout=5).json()
@@ -56,19 +67,17 @@ except:
 
 for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
-
-    # Расчет времени для конкретного города
     local_now = datetime.now(timezone.utc) + timedelta(hours=offset)
 
     # 1. Расчет
     hour = local_now.hour + local_now.minute / 60.0
     base_norm = get_diurnal_trend(hour, lat, local_now)
-    val = base_norm + np.random.normal(0, 0.5)
+    val = base_norm + np.random.normal(0, 0.5 + (kp * 0.1))
 
     st.session_state.history[city].append(val)
     if len(st.session_state.history[city]) > 50: st.session_state.history[city].pop(0)
 
-    std_dev = 1.5
+    std_dev = 1.5 + (kp * 0.2)
     z = (val - base_norm) / std_dev
 
     # 2. Сейсмика
@@ -82,7 +91,7 @@ for city, (lat, lon, offset) in CITIES.items():
 
     with col1:
         st.subheader(f"📍 {city}")
-        st.caption(f"🕒 Местное время: {local_now.strftime('%H:%M:%S')}")  # Вывод времени
+        st.caption(f"🕒 Время: {local_now.strftime('%H:%M:%S')}")
         sign = "+" if z >= 0 else ""
         st.metric("VTEC (TECU)", f"{val:.1f}", f"{sign}{z:.1f}σ")
 
@@ -118,4 +127,4 @@ for city, (lat, lon, offset) in CITIES.items():
 
         st.pyplot(fig)
 
-st.write("Метод: Статистический анализ (Z-score) относительно динамической модели (Diurnal & Seasonal).")
+st.write("Метод: Статистический Z-анализ с адаптацией к геомагнитному фону (Kp-index) и сейсмической активностью.")
