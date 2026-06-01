@@ -9,16 +9,18 @@ import os
 import pandas as pd
 from datetime import datetime, timedelta
 
-# Настройка
+# Настройка страницы
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Аналитика")
-st.title("🛰 IonoSeis AI: Мониторинг литосферно-ионосферных связей")
+st.title("🛰 IonoSeis AI: Глобальный мониторинг литосферно-ионосферных связей")
 
 CITIES = {"Алматы": (43.25, 76.92), "Бишкек": (42.87, 74.59), "Токио": (35.68, 139.65)}
 
+# Инициализация памяти для динамики
 if 'prev_tec' not in st.session_state:
     st.session_state.prev_tec = {city: 0.0 for city in CITIES}
 
 
+# --- ФУНКЦИИ ---
 def setup_auth():
     os.environ['EARTHDATA_USERNAME'] = st.secrets['EARTHDATA_USERNAME']
     os.environ['EARTHDATA_PASSWORD'] = st.secrets['EARTHDATA_PASSWORD']
@@ -52,36 +54,39 @@ def get_normalized_tec(grid, lat, lon):
     return raw_val / 10.0 if raw_val > 100 else raw_val
 
 
-if st.button("🚀 АНАЛИЗ VTEC И СЕЙСМИКИ (24Ч)"):
+# --- ИНТЕРФЕЙС ---
+if st.button("🚀 АНАЛИЗ VTEC И СЕЙСМИЧЕСКОЙ АКТИВНОСТИ"):
     try:
-        with st.spinner("Синхронизация с серверами IGS..."):
+        with st.spinner("Синхронизация данных..."):
             setup_auth()
-
-            # Ищем данные за последние 3 дня, чтобы гарантированно найти опубликованный файл
-            search_date = datetime.now() - timedelta(days=2)
-            results = earthaccess.search_data(
-                short_name='GNSS_IGS_AC_ion_VTEC_comp',
-                temporal=(search_date - timedelta(days=1), search_date),
-                count=1
-            )
+            results = earthaccess.search_data(short_name='GNSS_IGS_AC_ion_VTEC_comp',
+                                              temporal=(datetime.now() - timedelta(days=5), datetime.now()), count=1)
 
             if results:
                 files = earthaccess.download(results, "./tmp")
                 grid = parse_upc_ionex(files[0])
-
-                # Запрос событий за последние 24 часа
-                start_time = (datetime.now() - timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%S')
                 quakes = requests.get(
-                    f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={start_time}").json()
+                    "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=100").json()
 
                 for city, (c_lat, c_lon) in CITIES.items():
                     st.markdown("---")
                     st.subheader(f"📍 Регион: {city}")
                     val = get_normalized_tec(grid, c_lat, c_lon)
 
+                    # Расчет динамики
+                    delta = val - st.session_state.prev_tec[city]
+                    st.session_state.prev_tec[city] = val
+
                     c1, c2 = st.columns([1, 2])
                     with c1:
-                        st.metric(label="VTEC (TECU)", value=f"{val:.2f}")
+                        # Streamlit сам добавит стрелку и цвет:
+                        # inverse означает: рост VTEC = красный, падение = зеленый
+                        st.metric(
+                            label="VTEC (TECU)",
+                            value=f"{val:.2f}",
+                            delta=f"{delta:.2f}",
+                            delta_color="inverse"
+                        )
                         fig, ax = plt.subplots(figsize=(6, 1.5))
                         ax.barh(0, val, color='red' if val > 50 else 'skyblue')
                         ax.set_xlim(0, 100)
@@ -92,7 +97,7 @@ if st.button("🚀 АНАЛИЗ VTEC И СЕЙСМИКИ (24Ч)"):
 
                     with c2:
                         local_q = [f"🔹 {f['properties']['place']} | M: {f['properties']['mag']}"
-                                   for f in quakes.get('features', [])
+                                   for f in quakes['features']
                                    if ((f['geometry']['coordinates'][1] - c_lat) ** 2 +
                                        (f['geometry']['coordinates'][0] - c_lon) ** 2) ** 0.5 * 111 < 1500
                                    and f['properties']['mag'] > 3.0]
@@ -102,7 +107,7 @@ if st.button("🚀 АНАЛИЗ VTEC И СЕЙСМИКИ (24Ч)"):
                         else:
                             st.info(f"Спокойно: в радиусе 1500 км от {city} событий > 3.0 нет.")
             else:
-                st.warning("Данные IONEX сейчас отсутствуют на сервере IGS. Попробуйте обновить страницу чуть позже.")
+                st.warning("Нет новых данных NASA.")
     except Exception as e:
         st.error(f"Ошибка системы: {e}")
 
