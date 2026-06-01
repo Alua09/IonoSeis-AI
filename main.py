@@ -23,14 +23,20 @@ def get_dynamic_search_radius(mag):
 
 
 def get_seasonal_factor(date):
+    """
+    Сезонная коррекция: ионосфера имеет выраженную годовую вариацию.
+    Пики плотности приходятся на периоды равноденствий (день 80 и 260).
+    """
     day_of_year = date.timetuple().tm_yday
     return 1.0 + 0.2 * math.sin(2 * math.pi * (day_of_year - 80) / 365)
 
 
-def get_diurnal_trend(hour, lat):
-    """Модель суточного хода: синусоидальный пик VTEC в дневное время."""
+def get_diurnal_trend(hour, lat, date):
+    """Модель с учетом суточного хода, широты и СЕЗОННОСТИ."""
+    seasonal = get_seasonal_factor(date)
     # Пик в 14:00 местного времени
-    return 10.0 + 15.0 * math.cos(math.pi * (hour - 14) / 12) * (math.cos(math.radians(lat)))
+    diurnal = 10.0 + 15.0 * math.cos(math.pi * (hour - 14) / 12)
+    return diurnal * (math.cos(math.radians(lat))) * seasonal
 
 
 # --- ИНТЕРФЕЙС ---
@@ -47,19 +53,25 @@ for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
     now = datetime.now(timezone.utc) + timedelta(hours=offset)
 
-    # 1. Расчет нормы с учетом суточного хода и сезона
+    # 1. Расчет базовой нормы (Норма с учетом сезона и суточного хода)
     hour = now.hour + now.minute / 60.0
-    base_norm = get_diurnal_trend(hour, lat) * get_seasonal_factor(now)
+    base_norm = get_diurnal_trend(hour, lat, now)
 
-    # 2. Живые данные (модель + небольшой шум)
+    # 2. Эмуляция VTEC (база + шум)
     val = base_norm + np.random.normal(0, 0.5)
 
-    # Логирование тренда
+    # 3. Логирование для тренда
     st.session_state.history[city].append(val)
     if len(st.session_state.history[city]) > 20: st.session_state.history[city].pop(0)
 
-    # 3. Z-score (сравнение с суточным прогнозом)
+    # 4. Анализ (Z-score)
     z = (val - base_norm) / 2.0
+
+    # 5. Сейсмика
+    found_quakes = [f for f in quakes.get('features', [])
+                    if math.sqrt((f['geometry']['coordinates'][1] - lat) ** 2 +
+                                 (f['geometry']['coordinates'][0] - lon) ** 2) * 111 < get_dynamic_search_radius(
+            f['properties']['mag'])]
 
     col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
 
@@ -77,23 +89,16 @@ for city, (lat, lon, offset) in CITIES.items():
 
     with col3:
         st.write("Сейсмическая сводка:")
-        found_quakes = [f for f in quakes.get('features', [])
-                        if math.sqrt((f['geometry']['coordinates'][1] - lat) ** 2 +
-                                     (f['geometry']['coordinates'][0] - lon) ** 2) * 111 < get_dynamic_search_radius(
-                f['properties']['mag'])]
         if found_quakes:
             st.error(f"⚠️ Событие M{found_quakes[0]['properties']['mag']}")
         else:
             st.success("✅ Спокойно")
 
     with col4:
-        # Визуализация с суточным ходом
         fig, ax = plt.subplots(figsize=(6, 1))
         ax.plot(st.session_state.history[city], color='cyan', linewidth=2)
-        ax.axhline(y=base_norm, color='gray', linestyle='--', alpha=0.5, label='Модель')
-        ax.fill_between(range(len(st.session_state.history[city])), st.session_state.history[city], color='cyan',
-                        alpha=0.1)
+        ax.axhline(y=base_norm, color='gray', linestyle='--', alpha=0.5)
         ax.axis('off')
         st.pyplot(fig)
 
-st.write("Метод: Анализ с учетом суточной вариации (Diurnal Variation) и сезонной коррекции.")
+st.write("Метод: Статистический анализ с учетом суточной вариации, широты и сезонных циклов.")
