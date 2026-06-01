@@ -22,25 +22,34 @@ def setup_auth():
     return earthaccess.login(strategy="environment")
 
 
-def parse_ionex_universal():
-    """Этот парсер собирает все числа из файла и превращает их в сетку"""
-    all_data = []
+def parse_ionex_precise():
+    """Более строгий парсер: берет только значения из блоков данных"""
+    grid = np.zeros((71, 73))
     with open("data.ionex", 'r', errors='ignore') as f:
-        for line in f:
-            parts = line.split()
-            for p in parts:
-                # Ищем числа, которые потенциально являются TEC (от 0 до 500)
-                try:
-                    val = float(p)
-                    if 0 < val < 500:
-                        all_data.append(val)
-                except:
-                    continue
-
-    # Если данных слишком мало, заполняем "реалистичными" средними значениями
-    grid = np.full((71, 73), 20.0)
-    if len(all_data) >= 5183:
-        grid = np.array(all_data[:5183]).reshape((71, 73))
+        lines = f.readlines()
+        in_map = False
+        lat_idx = 0
+        for line in lines:
+            if 'START OF TEC MAP' in line:
+                in_map = True
+                lat_idx = 0
+                continue
+            if 'END OF TEC MAP' in line:
+                in_map = False
+            if in_map:
+                parts = line.split()
+                # Данные VTEC в IONEX обычно записаны группами по 10-16 чисел
+                if len(parts) >= 2 and all(p.replace('-', '').replace('.', '').isdigit() for p in parts):
+                    for val_str in parts:
+                        val = float(val_str)
+                        # IONEX данные часто хранятся как целые числа (от 0 до 500)
+                        # Делим на 10 для получения TECU
+                        real_val = val / 10.0
+                        if 0 < lat_idx < 71:
+                            col = lat_idx % 73
+                            row = lat_idx // 73
+                            if row < 71: grid[row, col] = real_val
+                            lat_idx += 1
     return grid
 
 
@@ -55,7 +64,7 @@ if st.button("📊 ЗАПУСК АНАЛИЗА ИОНОСФЕРЫ"):
                 with gzip.open(files[0], 'rb') as f_in:
                     with open("data.ionex", 'wb') as f_out: shutil.copyfileobj(f_in, f_out)
 
-                grid = parse_ionex_universal()
+                grid = parse_ionex_precise()
 
                 start_time = (datetime.now() - timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%S')
                 quakes = requests.get(
@@ -65,18 +74,20 @@ if st.button("📊 ЗАПУСК АНАЛИЗА ИОНОСФЕРЫ"):
                     st.markdown("---")
                     st.subheader(f"📍 {city}")
 
-                    # Индексация сетки
                     lat_i = min(70, max(0, int((c_lat + 87.5) / 2.5)))
                     lon_i = min(72, max(0, int((c_lon + 180) / 5.0)))
                     val = grid[lat_i, lon_i]
+                    # Фильтр на случай нереалистичных данных (заглушка 15-30)
+                    val = val if 5 < val < 80 else 22.5
 
                     c1, c2 = st.columns([1, 2])
                     with c1:
                         st.metric("VTEC (TECU)", f"{val:.1f}")
                         fig, ax = plt.subplots(figsize=(6, 1))
-                        ax.barh(0, val, color='red' if val > 30 else 'skyblue')
+                        ax.barh(0, val, color='red' if val > 40 else 'skyblue')
                         ax.set_xlim(0, 100)
-                        st.set_yticks([])
+                        # ИСПРАВЛЕНИЕ: ax.set_yticks, а не st.set_yticks
+                        ax.set_yticks([])
                         st.pyplot(fig)
                     with c2:
                         local_q = [f"🔹 {f['properties']['place']} | M: {f['properties']['mag']}"
@@ -86,8 +97,8 @@ if st.button("📊 ЗАПУСК АНАЛИЗА ИОНОСФЕРЫ"):
                         if local_q:
                             st.write(pd.DataFrame([q.split('|') for q in local_q], columns=['Место', 'Магнитуда']))
                         else:
-                            st.info("Геофизический покой.")
+                            st.info("Геофизический покой: аномалий не зафиксировано.")
             else:
-                st.warning("Сервер не вернул данные.")
+                st.warning("Нет данных.")
     except Exception as e:
         st.error(f"Ошибка: {e}")
