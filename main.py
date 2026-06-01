@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import requests
 import math
+import time
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
@@ -32,15 +33,11 @@ def get_dynamic_search_radius(mag):
     return 300 * (1.5 ** (mag - 5.0))
 
 
-def get_seasonal_factor(date):
-    day_of_year = date.timetuple().tm_yday
-    return 1.0 + 0.2 * math.sin(2 * math.pi * (day_of_year - 80) / 365)
-
-
 def get_diurnal_trend(hour, lat, date):
-    seasonal = get_seasonal_factor(date)
+    day_of_year = date.timetuple().tm_yday
+    seasonal = 1.0 + 0.2 * math.sin(2 * math.pi * (day_of_year - 80) / 365)
     diurnal = 10.0 + 15.0 * math.cos(math.pi * (hour - 14) / 12)
-    return diurnal * (math.cos(math.radians(lat))) * seasonal
+    return round(diurnal * (math.cos(math.radians(lat))) * seasonal, 1)
 
 
 def moving_average(data, window=5):
@@ -54,9 +51,6 @@ st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 kp = get_current_kp_index()
 kp_status = "⚠️ Повышен" if kp > 4 else "✅ Спокойно"
 st.info(f"🌐 Глобальный геомагнитный индекс (Kp): **{kp}** | Состояние: {kp_status}")
-
-if st.button("🔄 ОБНОВИТЬ ДАННЫЕ"):
-    st.rerun()
 
 # Сейсмика (USGS)
 try:
@@ -97,6 +91,7 @@ for city, (lat, lon, offset) in CITIES.items():
 
     with col2:
         st.write("Ионосфера:")
+        st.write(f"Норма: **{base_norm} TECU**")  # Конкретное значение нормы
         if abs(z) > 1.5:
             st.warning("⚠️ АНОМАЛИЯ")
         else:
@@ -115,7 +110,7 @@ for city, (lat, lon, offset) in CITIES.items():
         color = 'red' if abs(z) > 1.5 else 'cyan'
 
         ax.plot(smoothed, color=color, linewidth=2.5, label='VTEC Trend')
-        ax.axhline(y=base_norm, color='gray', linestyle='--', alpha=0.5, label='Norm')
+        ax.axhline(y=base_norm, color='gray', linestyle='--', alpha=0.5, label=f'Norm: {base_norm}')
 
         ax.legend(loc='upper left', fontsize=8, frameon=False)
         ax.spines['top'].set_visible(False);
@@ -128,3 +123,7 @@ for city, (lat, lon, offset) in CITIES.items():
         st.pyplot(fig)
 
 st.write("Метод: Статистический Z-анализ с адаптацией к геомагнитному фону (Kp-index) и сейсмической активностью.")
+
+# Автообновление каждые 5 секунд
+time.sleep(5)
+st.rerun()
