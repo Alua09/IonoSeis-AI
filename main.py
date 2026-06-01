@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 # Настройка
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Аналитика")
-st.title("🛰 IonoSeis AI: Глобальный мониторинг")
+st.title("🛰 IonoSeis AI: Глобальный мониторинг литосферно-ионосферных связей")
 
 CITIES = {"Алматы": (43.25, 76.92), "Бишкек": (42.87, 74.59), "Токио": (35.68, 139.65)}
 
@@ -55,9 +55,9 @@ def get_normalized_tec(grid, lat, lon):
 
 
 # --- ИНТЕРФЕЙС ---
-if st.button("🚀 ОБНОВИТЬ ВСЕ РЕГИОНЫ"):
+if st.button("🚀 АНАЛИЗ VTEC И СЕЙСМИЧЕСКОЙ АКТИВНОСТИ"):
     try:
-        with st.spinner("Синхронизация..."):
+        with st.spinner("Синхронизация данных..."):
             setup_auth()
             results = earthaccess.search_data(short_name='GNSS_IGS_AC_ion_VTEC_comp',
                                               temporal=(datetime.now() - timedelta(days=5), datetime.now()), count=1)
@@ -73,7 +73,7 @@ if st.button("🚀 ОБНОВИТЬ ВСЕ РЕГИОНЫ"):
                     st.subheader(f"📍 Регион: {city}")
                     val = get_normalized_tec(grid, c_lat, c_lon)
 
-                    # Расчет дельты для индикатора
+                    # Индикация динамики
                     delta = val - st.session_state.prev_tec[city]
                     st.session_state.prev_tec[city] = val
                     trend = "▲" if delta > 0 else "▼" if delta < 0 else "▬"
@@ -84,7 +84,7 @@ if st.button("🚀 ОБНОВИТЬ ВСЕ РЕГИОНЫ"):
                         fig, ax = plt.subplots(figsize=(6, 1.5))
                         ax.barh(0, val, color='red' if val > 50 else 'skyblue')
                         ax.set_xlim(0, 100)
-                        ax.set_xlabel("VTEC (TECU)")
+                        ax.set_xlabel("VTEC (ед. TECU)")
                         ax.axvline(x=50, color='orange', linestyle='--', alpha=0.6)
                         ax.set_yticks([])
                         st.pyplot(fig)
@@ -95,10 +95,14 @@ if st.button("🚀 ОБНОВИТЬ ВСЕ РЕГИОНЫ"):
                                    if ((f['geometry']['coordinates'][1] - c_lat) ** 2 +
                                        (f['geometry']['coordinates'][0] - c_lon) ** 2) ** 0.5 * 111 < 1500
                                    and f['properties']['mag'] > 3.0]
-                        st.write(local_q if local_q else "Спокойно: событий > 3.0 нет.")
+
+                        if local_q:
+                            st.write(pd.DataFrame([q.split('|') for q in local_q], columns=['Место', 'Магнитуда']))
+                        else:
+                            st.info(f"Спокойно: в радиусе 1500 км от {city} событий > 3.0 нет.")
             else:
                 st.warning("Нет новых данных NASA.")
     except Exception as e:
-        st.error(f"Ошибка: {e}")
+        st.error(f"Ошибка системы: {e}")
 
-st.write("Метод основан на анализе ионосферных предвестников сейсмической активности.")
+st.write("Метод основан на анализе ионосферных аномалий как предвестников сейсмических событий.")
