@@ -3,29 +3,52 @@ import earthaccess
 import numpy as np
 import matplotlib.pyplot as plt
 import requests
-import gzip
-import shutil
 import os
 import pandas as pd
 from datetime import datetime, timedelta
-import subprocess # Для вызова системных команд распаковки, если есть
 
-# ... (остальной код остается тем же, меняем только safe_extract)
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Аналитика")
+st.title("🛰 IonoSeis AI: Мониторинг ионосферы")
 
-def safe_extract(file_path):
-    """Максимально надежный метод: пытается gzip, если нет — пробует uncompress, если нет — копирует как есть"""
+
+# Настройки доступа
+def setup_auth():
+    # Проверка наличия секретов
+    if 'EARTHDATA_USERNAME' not in st.secrets:
+        st.error("Ошибка: Настройте EARTHDATA_USERNAME и PASSWORD в Secrets!")
+        return False
+    os.environ['EARTHDATA_USERNAME'] = st.secrets['EARTHDATA_USERNAME']
+    os.environ['EARTHDATA_PASSWORD'] = st.secrets['EARTHDATA_PASSWORD']
+    return True
+
+
+if st.button("🚀 ЗАПУСК"):
     try:
-        # Пробуем через gzip
-        with gzip.open(file_path, 'rb') as f_in:
-            with open("data.ionex", 'wb') as f_out: shutil.copyfileobj(f_in, f_out)
-    except:
-        # Если не вышло, пробуем через системную команду uncompress (если доступна)
-        try:
-            subprocess.run(["uncompress", file_path], check=True)
-            # После распаковки файл должен изменить имя на .ionex или похожее
-            # В данном случае просто переименуем его, если он есть
-            uncompressed_file = file_path.replace('.Z', '')
-            shutil.move(uncompressed_file, "data.ionex")
-        except:
-            # Если всё совсем плохо, просто копируем файл (иногда он уже распакован)
-            shutil.copyfile(file_path, "data.ionex")
+        if not setup_auth(): st.stop()
+
+        with st.spinner("Поиск данных..."):
+            auth = earthaccess.login(strategy="environment")
+            results = earthaccess.search_data(
+                short_name='GNSS_IGS_AC_ion_VTEC_comp',
+                temporal=(datetime.now() - timedelta(days=5), datetime.now())
+            )
+
+            if not results:
+                st.warning("Данные на сервере не найдены. Попробуйте позже.")
+                st.stop()
+
+            st.write(f"Найдено файлов: {len(results)}")
+            # Скачиваем без сложной распаковки для теста
+            files = earthaccess.download(results[0:1], "./tmp")
+            st.write(f"Файл загружен: {files[0]}")
+
+            # Если файл не пустой
+            if os.path.exists(files[0]):
+                st.success("Данные успешно получены!")
+                # Выводим первые 10 строк файла как текст
+                with open(files[0], 'r', errors='ignore') as f:
+                    content = f.readlines()[:10]
+                    st.code("".join(content))
+
+    except Exception as e:
+        st.exception(e)  # Это покажет ошибку на экране, а не пустой экран
