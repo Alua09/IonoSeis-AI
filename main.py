@@ -7,6 +7,8 @@ from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Dashboard")
+
+# CITIES: (lat, lon, offset_hours)
 CITIES = {
     "Алматы": (43.25, 76.92, 5),
     "Бишкек": (42.87, 74.59, 6),
@@ -54,11 +56,13 @@ except:
 
 for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
-    now = datetime.now(timezone.utc) + timedelta(hours=offset)
+
+    # Расчет времени для конкретного города
+    local_now = datetime.now(timezone.utc) + timedelta(hours=offset)
 
     # 1. Расчет
-    hour = now.hour + now.minute / 60.0
-    base_norm = get_diurnal_trend(hour, lat, now)
+    hour = local_now.hour + local_now.minute / 60.0
+    base_norm = get_diurnal_trend(hour, lat, local_now)
     val = base_norm + np.random.normal(0, 0.5)
 
     st.session_state.history[city].append(val)
@@ -78,6 +82,7 @@ for city, (lat, lon, offset) in CITIES.items():
 
     with col1:
         st.subheader(f"📍 {city}")
+        st.caption(f"🕒 Местное время: {local_now.strftime('%H:%M:%S')}")  # Вывод времени
         sign = "+" if z >= 0 else ""
         st.metric("VTEC (TECU)", f"{val:.1f}", f"{sign}{z:.1f}σ")
 
