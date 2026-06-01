@@ -22,46 +22,47 @@ def setup_auth():
     return earthaccess.login(strategy="environment")
 
 
-def parse_upc_ionex_accurate():
-    """Более точный парсер для формата IONEX"""
+def parse_upc_ionex_robust():
+    """Максимально надежный парсер: игнорирует заголовки и ищет блоки данных"""
     grid = np.zeros((71, 73))
-    with open("data.ionex", 'r', errors='ignore') as f:
-        lines = f.readlines()
+    lat_count = 0
 
-    # Ищем блок данных
-    i = 0
-    while i < len(lines):
-        if 'START OF TEC MAP' in lines[i]:
-            i += 1
-            # В блоке TEC MAP данные идут по 2 строки на широту
-            for lat_idx in range(71):
-                # Читаем строку с данными
-                line = lines[i].split()
-                # В IONEX данные TEC — это целые числа, которые надо поделить на 10
-                for lon_idx in range(len(line)):
-                    if lon_idx < 73:
-                        grid[lat_idx, lon_idx] = float(line[lon_idx]) / 10.0
-                i += 1
-            break
-        i += 1
+    with open("data.ionex", 'r', errors='ignore') as f:
+        in_map = False
+        for line in f:
+            if 'START OF TEC MAP' in line:
+                in_map = True
+                continue
+            if 'END OF TEC MAP' in line:
+                in_map = False
+                continue
+
+            if in_map:
+                # Проверяем, содержит ли строка только числа (данные VTEC)
+                parts = line.split()
+                # В строке данных обычно много чисел, а в заголовках - буквы
+                if len(parts) >= 10 and all(p.lstrip('-').replace('.', '', 1).isdigit() for p in parts):
+                    if lat_count < 71:
+                        for lon_idx, val in enumerate(parts):
+                            if lon_idx < 73:
+                                grid[lat_count, lon_idx] = float(val) / 10.0
+                        lat_count += 1
     return grid
 
 
-if st.button("📊 АНАЛИЗ ИОНОСФЕРНЫХ ДАННЫХ"):
+if st.button("📊 ЗАПУСК АНАЛИЗА ИОНОСФЕРЫ"):
     try:
-        with st.spinner("Загрузка и обработка..."):
+        with st.spinner("Загрузка и обработка данных..."):
             setup_auth()
             results = earthaccess.search_data(short_name='GNSS_IGS_AC_ion_VTEC_comp',
                                               temporal=(datetime.now() - timedelta(days=5), datetime.now()))
             if results:
                 files = earthaccess.download(results[0:1], "./tmp")
-                # Распаковка
                 with gzip.open(files[0], 'rb') as f_in:
                     with open("data.ionex", 'wb') as f_out: shutil.copyfileobj(f_in, f_out)
 
-                grid = parse_upc_ionex_accurate()
+                grid = parse_upc_ionex_robust()
 
-                # Запрос событий
                 start_time = (datetime.now() - timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%S')
                 quakes = requests.get(
                     f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={start_time}").json()
@@ -70,7 +71,6 @@ if st.button("📊 АНАЛИЗ ИОНОСФЕРНЫХ ДАННЫХ"):
                     st.markdown("---")
                     st.subheader(f"📍 {city}")
 
-                    # Индексы для сетки IONEX (-87.5:2.5:87.5 и -180:5:180)
                     lat_i = int((c_lat + 87.5) / 2.5)
                     lon_i = int((c_lon + 180) / 5.0)
                     val = grid[lat_i, lon_i]
@@ -81,9 +81,9 @@ if st.button("📊 АНАЛИЗ ИОНОСФЕРНЫХ ДАННЫХ"):
                         fig, ax = plt.subplots(figsize=(6, 1))
                         ax.barh(0, val, color='red' if val > 40 else 'skyblue')
                         ax.set_xlim(0, 100)
+                        ax.set_yticks([])
                         st.pyplot(fig)
                     with c2:
-                        # Логика поиска событий
                         local_q = [f"🔹 {f['properties']['place']} | M: {f['properties']['mag']}"
                                    for f in quakes.get('features', [])
                                    if ((f['geometry']['coordinates'][1] - c_lat) ** 2 +
@@ -93,6 +93,6 @@ if st.button("📊 АНАЛИЗ ИОНОСФЕРНЫХ ДАННЫХ"):
                         else:
                             st.info("Геофизический покой.")
             else:
-                st.warning("Нет данных.")
+                st.warning("Нет данных для анализа.")
     except Exception as e:
-        st.error(f"Ошибка: {e}")
+        st.error(f"Ошибка парсинга: {e}")
