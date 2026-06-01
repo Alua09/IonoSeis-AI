@@ -9,6 +9,7 @@ import os
 import pandas as pd
 from datetime import datetime, timedelta
 
+# Настройка страницы
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Аналитика")
 st.title("🛰 IonoSeis AI: Мониторинг литосферно-ионосферных связей")
 
@@ -18,6 +19,7 @@ if 'prev_tec' not in st.session_state:
     st.session_state.prev_tec = {city: 0.0 for city in CITIES}
 
 
+# --- ФУНКЦИИ ---
 def setup_auth():
     os.environ['EARTHDATA_USERNAME'] = st.secrets['EARTHDATA_USERNAME']
     os.environ['EARTHDATA_PASSWORD'] = st.secrets['EARTHDATA_PASSWORD']
@@ -51,12 +53,24 @@ def get_normalized_tec(grid, lat, lon):
     return raw_val / 10.0 if raw_val > 100 else raw_val
 
 
-if st.button("🚀 АНАЛИЗ VTEC И СЕЙСМИКИ (24Ч)"):
+# --- ИНТЕРФЕЙС ---
+if st.button("🚀 АНАЛИЗ VTEC И СЕЙСМИЧЕСКОЙ АКТИВНОСТИ"):
     try:
-        with st.spinner("Синхронизация..."):
+        with st.spinner("Синхронизация данных с NASA и USGS..."):
             setup_auth()
-            results = earthaccess.search_data(short_name='GNSS_IGS_AC_ion_VTEC_comp',
-                                              temporal=(datetime.now() - timedelta(days=1), datetime.now()), count=1)
+
+            # Умный поиск: ищем данные за сегодня, если нет — за предыдущие дни
+            results = None
+            days_back = 0
+            while days_back < 3 and results is None:
+                target_date = datetime.now() - timedelta(days=days_back)
+                results = earthaccess.search_data(
+                    short_name='GNSS_IGS_AC_ion_VTEC_comp',
+                    temporal=(target_date - timedelta(days=1), target_date),
+                    count=1
+                )
+                days_back += 1
+
             if results:
                 files = earthaccess.download(results, "./tmp")
                 grid = parse_upc_ionex(files[0])
@@ -77,6 +91,7 @@ if st.button("🚀 АНАЛИЗ VTEC И СЕЙСМИКИ (24Ч)"):
 
                     c1, c2 = st.columns([1, 2])
                     with c1:
+                        # Индикатор: рост VTEC (аномалия) будет красным
                         st.metric(label="VTEC (TECU)", value=f"{val:.2f}", delta=display_delta, delta_color="inverse")
                         fig, ax = plt.subplots(figsize=(6, 1.5))
                         ax.barh(0, val, color='red' if val > 50 else 'skyblue')
@@ -87,7 +102,6 @@ if st.button("🚀 АНАЛИЗ VTEC И СЕЙСМИКИ (24Ч)"):
                         st.pyplot(fig)
 
                     with c2:
-                        # Фильтруем события из полученного списка по расстоянию
                         local_q = [f"🔹 {f['properties']['place']} | M: {f['properties']['mag']}"
                                    for f in quakes.get('features', [])
                                    if ((f['geometry']['coordinates'][1] - c_lat) ** 2 +
@@ -99,8 +113,8 @@ if st.button("🚀 АНАЛИЗ VTEC И СЕЙСМИКИ (24Ч)"):
                         else:
                             st.info(f"Спокойно: в радиусе 1500 км от {city} событий > 3.0 нет.")
             else:
-                st.warning("Нет данных.")
+                st.warning("Данные IONEX временно недоступны на серверах NASA.")
     except Exception as e:
-        st.error(f"Ошибка: {e}")
+        st.error(f"Ошибка системы: {e}")
 
 st.write("Метод основан на анализе ионосферных аномалий как предвестников сейсмических событий.")
