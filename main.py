@@ -8,14 +8,13 @@ import shutil
 import os
 from datetime import datetime, timedelta
 
-# Настройка страницы
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Professional Monitor")
-st.title("🛰 IonoSeis AI: Анализ литосферно-ионосферной связи")
+# --- КОНФИГУРАЦИЯ ---
+st.set_page_config(layout="wide", page_title="IonoSeis AI: KZ Monitor")
+st.title("🛰 IonoSeis AI: Анализ ионосферы Казахстана")
 
 
-# --- 1. АВТОРИЗАЦИЯ И ПОИСК ---
+# --- ФУНКЦИИ ---
 def setup_auth():
-    # Создаем netrc файл для earthaccess, используя Streamlit Secrets
     netrc_path = os.path.expanduser("~/.netrc")
     with open(netrc_path, "w") as f:
         f.write(
@@ -24,13 +23,11 @@ def setup_auth():
     earthaccess.login(strategy="netrc")
 
 
-# --- 2. УЛУЧШЕННЫЙ ПАРСЕР ---
-def parse_upc_ionex(file_path):
-    # Распаковка .gz
+def parse_and_clean(file_path):
     with gzip.open(file_path, 'rb') as f_in:
         with open("data.ionex", 'wb') as f_out: shutil.copyfileobj(f_in, f_out)
 
-    tec_values = []
+    tec = []
     with open("data.ionex", 'r', errors='ignore') as f:
         in_block = False
         for line in f:
@@ -38,55 +35,52 @@ def parse_upc_ionex(file_path):
                 in_block = True
             elif 'END OF TEC MAP' in line:
                 in_block = False
-            elif in_block and not any(x in line for x in ['LAT/LON1/LON2', 'EPOCH', 'START', 'END']):
+            elif in_block and not any(x in line for x in ['LAT/LON', 'EPOCH']):
                 for p in line.split():
                     try:
                         val = float(p)
-                        # ФИЛЬТР: оставляем только физически адекватные значения VTEC
-                        tec_values.append(val if 0 < val < 300 else np.nan)
+                        # Фильтр: 0-200 TECU (реалистичный диапазон)
+                        tec.append(val if 0 < val < 200 else np.nan)
                     except:
                         continue
 
-    data = np.array(tec_values, dtype=float)
-    # Заполняем пропуски средним значением для корректного отображения карты
-    data[np.isnan(data)] = np.nanmean(data)
+    data = np.array(tec, dtype=float)
+    data[np.isnan(data)] = np.nanmean(data)  # Заполнение пропусков
     return data[:5183].reshape((71, 73))
 
 
-# --- 3. ИНТЕРФЕЙС ---
-if st.button("🚀 ЗАПУСТИТЬ МОНИТОРИНГ И НАЛОЖЕНИЕ ДАННЫХ"):
+# --- ИНТЕРФЕЙС ---
+if st.button("🚀 ЗАПУСТИТЬ АНАЛИЗ КАЗАХСТАНА"):
     try:
-        with st.spinner("Синхронизация с серверами NASA и USGS..."):
+        with st.spinner("Синхронизация данных..."):
             setup_auth()
-            # Поиск актуальных данных за последние 5 дней
-            results = earthaccess.search_data(
-                short_name='GNSS_IGS_AC_ion_VTEC_comp',
-                temporal=(datetime.now() - timedelta(days=5), datetime.now()),
-                count=1
-            )
+            results = earthaccess.search_data(short_name='GNSS_IGS_AC_ion_VTEC_comp', count=1)
             files = earthaccess.download(results, "./tmp")
-            grid = parse_upc_ionex(files[0])
+            grid = parse_and_clean(files[0])
 
-            # Визуализация
-            fig, ax = plt.subplots(figsize=(12, 6))
-            im = ax.imshow(np.flipud(grid.T), cmap='inferno', interpolation='nearest',
+            # Визуализация с фокусом на РК
+            fig, ax = plt.subplots(figsize=(10, 6))
+            im = ax.imshow(np.flipud(grid.T), cmap='inferno', interpolation='bicubic',
                            extent=[-180, 180, -87.5, 87.5], aspect='auto', alpha=0.9)
 
-            # Наложение сейсмики (USGS)
+            # Фокус на Казахстан и Центральную Азию
+            ax.set_xlim(40, 95)
+            ax.set_ylim(35, 60)
+
+            # Сейсмические события
             quakes = requests.get(
-                "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=5.5&limit=20").json()
+                "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=5&limit=10").json()
             for f in quakes['features']:
                 lon, lat = f['geometry']['coordinates'][:2]
-                mag = f['properties']['mag']
-                ax.scatter(lon, lat, color='white', marker='*', s=150, edgecolors='black', label=f'Mag {mag}')
+                ax.scatter(lon, lat, color='white', marker='*', s=100, edgecolors='black')
 
             plt.colorbar(im, label='VTEC (TECU)')
-            ax.set_title("Глобальная карта VTEC и эпицентры сильных землетрясений")
+            ax.set_title("Карта VTEC: Казахстан и сейсмические эпицентры")
             st.pyplot(fig)
-            st.success("Анализ завершен.")
-
+            st.success("Анализ региона завершен.")
     except Exception as e:
-        st.error(f"Ошибка в процессе синхронизации: {e}")
+        st.error(f"Ошибка: {e}")
 
 st.markdown("---")
-st.write("Метод основан на выявлении аномалий плотности электронов в ионосфере, вызванных тектоническими процессами.")
+st.write(
+    "Механизм: локальный анализ ионосферных аномалий над территорией Казахстана для сейсмического прогнозирования.")
