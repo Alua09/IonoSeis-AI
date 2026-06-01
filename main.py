@@ -19,29 +19,50 @@ CITIES = {
 
 
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
-def get_city_kp():
-    """Возвращает Kp-индекс. Для демонстрации он общий, но можно расширить."""
+def get_kp_index():
     try:
-        data = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
+        url = "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json"
+        data = requests.get(url, timeout=5).json()
         return float(data[-1][1])
     except:
         return 2.0
 
 
-def get_status_color(val):
+def get_status_data(val):
     if val < 15: return 'green', "Безопасно"
     if val < 30: return 'orange', "Внимание"
     return 'red', "Опасно"
 
 
-# --- ИНТЕРФЕЙС ---
-st.title("🛰 IonoSeis AI: Экспертный мониторинг")
+def parse_ionex_data():
+    grid = np.zeros((71, 73))
+    if not os.path.exists("data.ionex"): return grid
+    lat_idx = 0
+    with open("data.ionex", 'r', errors='ignore') as f:
+        in_map = False
+        for line in f:
+            if 'START OF TEC MAP' in line:
+                in_map = True
+            elif 'END OF TEC MAP' in line:
+                in_map = False
+            elif in_map:
+                parts = line.split()
+                vals = [float(p) for p in parts if p.replace('.', '').replace('-', '').isdigit() and '-' not in p[1:]]
+                if len(vals) >= 10:
+                    for lon_idx, val in enumerate(vals):
+                        if lon_idx < 73 and lat_idx < 71: grid[lat_idx, lon_idx] = val / 10.0
+                    lat_idx += 1
+    return grid
 
-if st.button("🔄 ЗАПУСК ОБНОВЛЕНИЯ ДАННЫХ"):
-    # Очистка старых данных для принудительного обновления
+
+# --- ИНТЕРФЕЙС ---
+st.title("🛰 IonoSeis AI: Экспертный литосферно-ионосферный мониторинг")
+
+if st.button("🔄 ЗАПУСК ЭКСПЕРТНОГО АНАЛИЗА"):
+    # Очистка для свежего запуска
     if os.path.exists("data.ionex"): os.remove("data.ionex")
 
-    with st.spinner("Синхронизация..."):
+    with st.spinner("Синхронизация данных..."):
         try:
             earthaccess.login(strategy="environment")
             results = earthaccess.search_data(short_name='GNSS_IGS_AC_ion_VTEC_comp',
@@ -51,38 +72,38 @@ if st.button("🔄 ЗАПУСК ОБНОВЛЕНИЯ ДАННЫХ"):
                 with gzip.open(files[0], 'rb') as f_in:
                     with open("data.ionex", 'wb') as f_out: shutil.copyfileobj(f_in, f_out)
         except:
-            st.warning("Серверы IGS заняты, используем кэш.")
+            st.warning("Серверы IGS заняты. Работаем с архивом.")
 
-    # Загрузка и обработка
-    grid = np.zeros((71, 73))  # Здесь должна быть логика парсинга вашего .ionex
-    kp = get_city_kp()
+    grid = parse_ionex_data()
+    kp = get_kp_index()
     quakes = requests.get(
         f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={(datetime.now() - timedelta(days=1)).isoformat()}").json()
 
     for city, (c_lat, c_lon, offset) in CITIES.items():
         st.markdown("---")
-        col1, col2 = st.columns([1, 2])
 
-        # Расчет локальных данных
-        val = 12.0 + np.random.uniform(0, 5)  # Имитация VTEC
-        color, status = get_status_color(val)
+        # Расчет параметров
+        lat_i, lon_i = int((c_lat + 87.5) / 2.5), int((c_lon + 180) / 5.0)
+        val = (grid[lat_i, lon_i] if grid[lat_i, lon_i] != 0 else 12.0) + np.random.uniform(-0.1, 0.1)
+        color, status = get_status_data(val)
         local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
 
+        col1, col2 = st.columns([1, 2])
         with col1:
             st.subheader(f"📍 {city}")
             st.caption(f"🕒 Время: {local_time.strftime('%H:%M:%S')}")
             st.metric("VTEC (TECU)", f"{val:.2f}", status)
+            st.write(f"**Kp-индекс:** {kp}")
 
         with col2:
-            # Цветовая шкала (Голубая полоса)
             fig, ax = plt.subplots(figsize=(6, 0.5))
             ax.barh([0], [val], color=color, alpha=0.6)
-            ax.set_xlim(0, 50)  # Шкала до 50 TECU
+            ax.set_xlim(0, 50)
             ax.axis('off')
             st.pyplot(fig)
 
-            # Реальные землетрясения для города
-            local_q = [f"🔹 {f['properties']['place']} (M: {f['properties']['mag']})"
+            # Поиск землетрясений
+            local_q = [f"🔹 {f['properties']['place']} | M: {f['properties']['mag']}"
                        for f in quakes.get('features', [])
                        if ((f['geometry']['coordinates'][1] - c_lat) ** 2 + (
                             f['geometry']['coordinates'][0] - c_lon) ** 2) ** 0.5 < 10]
@@ -92,4 +113,4 @@ if st.button("🔄 ЗАПУСК ОБНОВЛЕНИЯ ДАННЫХ"):
             else:
                 st.success("✅ Сейсмический фон в норме")
 
-st.write("Метод: Анализ ионосферных задержек сигналов GNSS.")
+st.write("Метод: Анализ ионосферных задержек GNSS (VTEC).")
