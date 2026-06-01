@@ -9,15 +9,49 @@ import os
 import pandas as pd
 from datetime import datetime, timedelta
 
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Global Monitor")
-st.title("🛰 IonoSeis AI: Глобальный сейсмо-ионосферный мониторинг")
+# Настройка
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Аналитика")
+st.title("🛰 IonoSeis AI: Мониторинг ионосферы и сейсмики")
 
-# Координаты городов (lat, lon)
 LOCATIONS = {
     "Алматы": (43.25, 76.92),
     "Бишкек": (42.87, 74.59),
     "Токио": (35.68, 139.65)
 }
+
+
+# --- ФУНКЦИИ ---
+def setup_auth():
+    os.environ['EARTHDATA_USERNAME'] = st.secrets['EARTHDATA_USERNAME']
+    os.environ['EARTHDATA_PASSWORD'] = st.secrets['EARTHDATA_PASSWORD']
+    return earthaccess.login(strategy="environment")
+
+
+def parse_upc_ionex(file_path):
+    with gzip.open(file_path, 'rb') as f_in:
+        with open("data.ionex", 'wb') as f_out: shutil.copyfileobj(f_in, f_out)
+    tec_values = []
+    with open("data.ionex", 'r', errors='ignore') as f:
+        in_block = False
+        for line in f:
+            if 'START OF TEC MAP' in line:
+                in_block = True
+            elif 'END OF TEC MAP' in line:
+                in_block = False
+            elif in_block and not any(x in line for x in ['LAT/LON1/LON2', 'EPOCH', 'START', 'END']):
+                for p in line.split():
+                    try:
+                        val = float(p)
+                        if val < 9000: tec_values.append(val)
+                    except:
+                        continue
+    return np.array(tec_values[:5183]).reshape((71, 73))
+
+
+def get_tec_for_coords(grid, lat, lon):
+    lat_idx = int((lat + 87.5) / 2.5)
+    lon_idx = int((lon + 180) / 5.0)
+    return grid[max(0, min(lat_idx, 70)), max(0, min(lon_idx, 72))]
 
 
 def get_kp_index():
@@ -29,31 +63,36 @@ def get_kp_index():
         return "N/A"
 
 
-def get_tec_for_coords(grid, lat, lon):
-    # Ionex данные обычно идут с шагом 2.5 по широте и 5.0 по долготе
-    lat_idx = int((lat + 87.5) / 2.5)
-    lon_idx = int((lon + 180) / 5.0)
-    # Защита от выхода за границы
-    lat_idx = max(0, min(lat_idx, 70))
-    lon_idx = max(0, min(lon_idx, 72))
-    return grid[lat_idx, lon_idx]
-
-
 # --- ИНТЕРФЕЙС ---
-if st.button("🚀 ОБНОВИТЬ ГЛОБАЛЬНЫЕ ДАННЫЕ"):
+if st.button("🚀 ЗАПУСТИТЬ ГЛОБАЛЬНЫЙ АНАЛИЗ"):
     with st.spinner("Синхронизация..."):
-        # 1. Kp-индекс
-        kp = get_kp_index()
-        st.metric("Глобальный геомагнитный Kp-индекс", kp)
+        try:
+            setup_auth()
+            results = earthaccess.search_data(
+                short_name='GNSS_IGS_AC_ion_VTEC_comp',
+                temporal=(datetime.now() - timedelta(days=2), datetime.now()),
+                count=1
+            )
+            if results:
+                files = earthaccess.download(results, "./tmp")
+                grid = parse_upc_ionex(files[0])
 
-        # 2. Ионосфера
-        # (Остальной код загрузки данных earthaccess...)
-        # ... (используем parse_upc_ionex из вашего кода) ...
+                # Показываем Kp
+                st.metric("Глобальный Kp-индекс", get_kp_index())
 
-        st.subheader("Сводка по регионам")
-        cols = st.columns(len(LOCATIONS))
-        for i, (city, (lat, lon)) in enumerate(LOCATIONS.items()):
-            tec = get_tec_for_coords(grid, lat, lon)  # grid получен после парсинга
-            cols[i].metric(f"VTEC: {city}", f"{tec:.2f} TECU")
+                # Показываем города
+                cols = st.columns(3)
+                for i, (city, (lat, lon)) in enumerate(LOCATIONS.items()):
+                    tec = get_tec_for_coords(grid, lat, lon)
+                    cols[i].metric(f"VTEC: {city}", f"{tec:.2f} TECU")
 
-st.write("Метод мониторинга основан на японской концепции литосферно-ионосферного сопряжения.")
+                # Карта
+                fig, ax = plt.subplots(figsize=(10, 5))
+                ax.imshow(np.flipud(grid.T), cmap='inferno', extent=[-180, 180, -87.5, 87.5], aspect='auto')
+                st.pyplot(fig)
+            else:
+                st.warning("Нет новых данных NASA.")
+        except Exception as e:
+            st.error(f"Ошибка: {e}")
+
+st.write("Метод основан на японской концепции литосферно-ионосферного сопряжения.")
