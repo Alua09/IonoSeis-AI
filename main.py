@@ -8,18 +8,24 @@ import io
 import os
 from datetime import datetime, timedelta
 
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Final")
+# Настройка страницы
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Monitor")
 st.title("🛰 IonoSeis AI: Мониторинг геофизических аномалий")
+
+# --- КОНФИГУРАЦИЯ ---
+HEADERS = {'User-Agent': 'Mozilla/5.0'}
 
 
 # --- ФУНКЦИИ ---
 def get_kp_index():
     try:
         url = "https://services.swpc.noaa.gov/products/noaa-k-index.json"
-        data = requests.get(url, timeout=5).json()
-        return float(data[-1][1])
+        response = requests.get(url, headers=HEADERS, timeout=10)
+        if response.status_code == 200:
+            return float(response.json()[-1][1])
     except:
-        return None
+        return "N/A"
+    return "N/A"
 
 
 def parse_ionex(file_path):
@@ -44,46 +50,45 @@ def parse_ionex(file_path):
 
 
 def get_ionex_data():
-    # 1. Попытка скачать свежий файл
     now = datetime.now()
     url = f"https://cddis.nasa.gov/archive/gnss/products/ionex/{now.year}/{now.strftime('%j')}/coDG{now.strftime('%j')}0.{now.strftime('%y')}i.gz"
 
     try:
         session = requests.Session()
         session.auth = (st.secrets["EARTHDATA_USERNAME"], st.secrets["EARTHDATA_PASSWORD"])
-        response = session.get(url, timeout=10)
+        response = session.get(url, headers=HEADERS, timeout=10)
         if response.status_code == 200 and response.content.startswith(b'\x1f\x8b'):
             with open("live_data.gz", "wb") as f: f.write(response.content)
             return "live_data.gz"
     except:
         pass
 
-    # 2. Если не вышло — берем резервный файл из GitHub-репозитория
     if os.path.exists("backup_ionex.gz"):
         return "backup_ionex.gz"
     return None
 
 
 # --- ИНТЕРФЕЙС ---
-if st.button("🚀 ЗАПУСТИТЬ МОНИТОРИНГ"):
-    with st.spinner("Синхронизация с базами данных..."):
-        # Ионосфера
+if st.button("🚀 ОБНОВИТЬ ДАННЫЕ"):
+    with st.spinner("Синхронизация..."):
+        # 1. Ионосфера
         file_path = get_ionex_data()
         if file_path:
             grid = parse_ionex(file_path)
             val = grid[int((43.25 + 87.5) / 2.5), int((76.92 + 180) / 5.0)]
             st.metric("VTEC над Алматы", f"{val:.2f} TECU")
+        else:
+            st.error("Данные ионосферы недоступны.")
 
-        # Kp-индекс и Сейсмика
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Глобальный Kp-индекс", get_kp_index() or "N/A")
+        # 2. Kp-индекс
+        st.metric("Глобальный Kp-индекс", get_kp_index())
 
-        with col2:
-            st.subheader("Сейсмика (USGS)")
-            r = requests.get("https://earthquake.usgs.gov/fdsnws/event/1/query?format=csv&limit=5&minmagnitude=2")
-            df = pd.read_csv(io.StringIO(r.text))
-            st.dataframe(df[['place', 'mag']])
+        # 3. Сейсмика
+        st.subheader("📉 Сейсмическая активность (USGS)")
+        r = requests.get("https://earthquake.usgs.gov/fdsnws/event/1/query?format=csv&limit=10&minmagnitude=2")
+        df = pd.read_csv(io.StringIO(r.text))
+        st.dataframe(df[['time', 'place', 'mag']])
+        st.line_chart(df.set_index('time')['mag'])
 
 st.markdown("---")
-st.write("Связь литосферы и ионосферы основана на изменении плотности электронов перед тектоническими сдвигами.")
+st.write("Механизм мониторинга основан на анализе VTEC ионосферы.")
