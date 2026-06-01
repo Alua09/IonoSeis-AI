@@ -9,15 +9,15 @@ import os
 import pandas as pd
 from datetime import datetime, timedelta
 
-# Настройка страницы
+# Настройка
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Аналитика")
-st.title("🛰 IonoSeis AI: Мониторинг ионосферы и сейсмики")
+st.title("🛰 IonoSeis AI: Глобальный мониторинг")
 
-CITIES = {
-    "Алматы": (43.25, 76.92),
-    "Бишкек": (42.87, 74.59),
-    "Токио": (35.68, 139.65)
-}
+CITIES = {"Алматы": (43.25, 76.92), "Бишкек": (42.87, 74.59), "Токио": (35.68, 139.65)}
+
+# Инициализация памяти для индикаторов динамики
+if 'prev_tec' not in st.session_state:
+    st.session_state.prev_tec = {city: 0.0 for city in CITIES}
 
 
 # --- ФУНКЦИИ ---
@@ -51,7 +51,6 @@ def get_normalized_tec(grid, lat, lon):
     lat_idx = max(0, min(int((lat + 87.5) / 2.5), 70))
     lon_idx = max(0, min(int((lon + 180) / 5.0), 72))
     raw_val = grid[lat_idx, lon_idx]
-    # Нормализация для устранения 200+ значений
     return raw_val / 10.0 if raw_val > 100 else raw_val
 
 
@@ -72,39 +71,34 @@ if st.button("🚀 ОБНОВИТЬ ВСЕ РЕГИОНЫ"):
                 for city, (c_lat, c_lon) in CITIES.items():
                     st.markdown("---")
                     st.subheader(f"📍 Регион: {city}")
-
                     val = get_normalized_tec(grid, c_lat, c_lon)
+
+                    # Расчет дельты для индикатора
+                    delta = val - st.session_state.prev_tec[city]
+                    st.session_state.prev_tec[city] = val
+                    trend = "▲" if delta > 0 else "▼" if delta < 0 else "▬"
 
                     c1, c2 = st.columns([1, 2])
                     with c1:
-                        st.metric(f"VTEC", f"{val:.2f} TECU")
+                        st.metric(f"VTEC", f"{val:.2f} TECU", f"{trend} {abs(delta):.2f}")
                         fig, ax = plt.subplots(figsize=(6, 1.5))
-
-                        # ИСПРАВЛЕНИЕ ЦВЕТОВ: Красный если > 50 (аномалия), Голубой если < 50 (норма)
-                        bar_color = 'red' if val > 50 else 'skyblue'
-                        ax.barh(0, val, color=bar_color)
-
+                        ax.barh(0, val, color='red' if val > 50 else 'skyblue')
                         ax.set_xlim(0, 100)
-                        ax.set_xlabel("VTEC (ед. TECU)")
+                        ax.set_xlabel("VTEC (TECU)")
                         ax.axvline(x=50, color='orange', linestyle='--', alpha=0.6)
                         ax.set_yticks([])
                         st.pyplot(fig)
 
                     with c2:
-                        local_q = []
-                        for f in quakes['features']:
-                            lon, lat = f['geometry']['coordinates'][:2]
-                            dist = ((lat - c_lat) ** 2 + (lon - c_lon) ** 2) ** 0.5 * 111
-                            if dist < 1500 and f['properties']['mag'] > 3.0:
-                                local_q.append({'place': f['properties']['place'], 'mag': f['properties']['mag']})
-
-                        if local_q:
-                            st.bar_chart(pd.DataFrame(local_q).set_index('place')['mag'])
-                        else:
-                            st.info(f"Спокойно: в радиусе 1500 км от {city} событий > 3.0 нет.")
+                        local_q = [f"🔹 {f['properties']['place']} | M: {f['properties']['mag']}"
+                                   for f in quakes['features']
+                                   if ((f['geometry']['coordinates'][1] - c_lat) ** 2 +
+                                       (f['geometry']['coordinates'][0] - c_lon) ** 2) ** 0.5 * 111 < 1500
+                                   and f['properties']['mag'] > 3.0]
+                        st.write(local_q if local_q else "Спокойно: событий > 3.0 нет.")
             else:
                 st.warning("Нет новых данных NASA.")
     except Exception as e:
         st.error(f"Ошибка: {e}")
 
-st.write("Метод мониторинга основан на литосферно-ионосферном сопряжении.")
+st.write("Метод основан на анализе ионосферных предвестников сейсмической активности.")
