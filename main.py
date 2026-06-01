@@ -28,6 +28,7 @@ def get_seasonal_factor(date):
 
 
 def get_diurnal_trend(hour, lat, date):
+    """Теоретическая норма (серая линия)"""
     seasonal = get_seasonal_factor(date)
     diurnal = 10.0 + 15.0 * math.cos(math.pi * (hour - 14) / 12)
     return diurnal * (math.cos(math.radians(lat))) * seasonal
@@ -44,7 +45,7 @@ st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 if st.button("🔄 ОБНОВИТЬ ДАННЫЕ"):
     st.success("Данные синхронизированы.")
 
-# Запрос сейсмики один раз
+# Сейсмика
 try:
     quakes = requests.get("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=" +
                           (datetime.now() - timedelta(days=1)).isoformat(), timeout=5).json()
@@ -55,25 +56,24 @@ for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
     now = datetime.now(timezone.utc) + timedelta(hours=offset)
 
-    # 1. Расчет нормы и данных
+    # 1. Расчет
     hour = now.hour + now.minute / 60.0
     base_norm = get_diurnal_trend(hour, lat, now)
     val = base_norm + np.random.normal(0, 0.5)
 
-    # 2. Тренд и Z-score
     st.session_state.history[city].append(val)
     if len(st.session_state.history[city]) > 50: st.session_state.history[city].pop(0)
 
     std_dev = 1.5
     z = (val - base_norm) / std_dev
 
-    # 3. Сейсмика
+    # 2. Сейсмика
     found_quakes = [f for f in quakes.get('features', [])
                     if math.sqrt((f['geometry']['coordinates'][1] - lat) ** 2 +
                                  (f['geometry']['coordinates'][0] - lon) ** 2) * 111 < get_dynamic_search_radius(
             f['properties']['mag'])]
 
-    # Визуализация
+    # 3. Визуализация
     col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
 
     with col1:
@@ -99,10 +99,18 @@ for city, (lat, lon, offset) in CITIES.items():
         fig, ax = plt.subplots(figsize=(6, 1.2))
         smoothed = moving_average(st.session_state.history[city], window=5)
         color = 'red' if abs(z) > 1.5 else 'cyan'
+
         ax.plot(smoothed, color=color, linewidth=2.5, label='VTEC Trend')
-        ax.axhline(y=base_norm, color='gray', linestyle='--', alpha=0.5, label='Норма')
-        ax.set_ylim(base_norm - 10, base_norm + 10)  # Фиксируем масштаб
-        ax.axis('off')
+        ax.axhline(y=base_norm, color='gray', linestyle='--', alpha=0.5, label='Norm')
+
+        ax.legend(loc='upper left', fontsize=8, frameon=False)
+        ax.spines['top'].set_visible(False);
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_visible(False);
+        ax.spines['bottom'].set_visible(False)
+        ax.set_xticks([]);
+        ax.set_yticks([])
+
         st.pyplot(fig)
 
-st.write("Метод: Статистический Z-анализ, сглаживание шумов и мониторинг литосферных событий.")
+st.write("Метод: Статистический анализ (Z-score) относительно динамической модели (Diurnal & Seasonal).")
