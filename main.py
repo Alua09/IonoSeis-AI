@@ -32,24 +32,13 @@ def get_latitude_norm(lat, date):
     return (10.0 + 15.0 * lat_factor) * get_seasonal_factor(date)
 
 
-def get_kp_index():
-    try:
-        data = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
-        return float(data[-1][1])
-    except:
-        return 2.0
-
-
 # --- ИНТЕРФЕЙС ---
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
 if st.button("🔄 ОБНОВИТЬ ДАННЫЕ"):
     st.success("Данные синхронизированы.")
 
-kp = get_kp_index()
-st.sidebar.subheader("🌍 Мониторинг")
-st.sidebar.metric("Глобальный Kp-индекс", kp)
-
+# Получение данных
 quakes = requests.get("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=" +
                       (datetime.now() - timedelta(days=1)).isoformat()).json()
 
@@ -57,31 +46,41 @@ for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
     now = datetime.now(timezone.utc) + timedelta(hours=offset)
 
-    # 1. Анализ Ионосферы (Независимый)
+    # 1. Расчет базовой модели (Нормы)
     base_norm = get_latitude_norm(lat, now)
+
+    # 2. Эмуляция VTEC (замените на парсинг .ionex в будущем)
     val = base_norm + np.random.normal(0, 1.2)
+
+    # 3. КОРРЕКТНЫЙ РАСЧЕТ Z-SCORE
+    # Z = (Значение - Норма) / Стандартное отклонение
+    # Если val > norm, z > 0 (положительное отклонение/избыток электронов)
+    # Если val < norm, z < 0 (отрицательное отклонение/дефицит электронов)
+    std_dev = 3.0
+    z = (val - base_norm) / std_dev
+
     st.session_state.history[city].append(val)
     if len(st.session_state.history[city]) > 20: st.session_state.history[city].pop(0)
 
-    z = (val - (base_norm + kp * 1.0)) / 3.0
-
-    # 2. Поиск событий (Независимый)
+    # 4. Поиск событий
     found_quakes = [f for f in quakes.get('features', [])
                     if math.sqrt((f['geometry']['coordinates'][1] - lat) ** 2 +
                                  (f['geometry']['coordinates'][0] - lon) ** 2) * 111 < get_dynamic_search_radius(
             f['properties']['mag'])]
 
-    # Индикаторы
+    # Визуализация
     col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
 
     with col1:
         st.subheader(f"📍 {city}")
-        st.metric("VTEC", f"{val:.1f}")
+        # Форматирование: знак плюс для положительных значений Z
+        sign = "+" if z >= 0 else ""
+        st.metric("VTEC (TECU)", f"{val:.1f}", f"{sign}{z:.1f}σ")
 
     with col2:
         st.write("Статус ионосферы:")
-        if z > 1.5:
-            st.warning("⚠️ АНОМАЛИЯ (Z-score)")
+        if abs(z) > 1.5:
+            st.warning("⚠️ АНОМАЛИЯ")
         else:
             st.info("✅ Стабильно")
 
@@ -90,12 +89,14 @@ for city, (lat, lon, offset) in CITIES.items():
         if found_quakes:
             st.error(f"⚠️ Событие M{found_quakes[0]['properties']['mag']}")
         else:
-            st.success("✅ Сейсмически спокойно")
+            st.success("✅ Спокойно")
 
     with col4:
         fig, ax = plt.subplots(figsize=(6, 1))
+        # Сдвигаем график, чтобы было видно колебания относительно нуля
         ax.plot(st.session_state.history[city], color='cyan')
+        ax.axhline(y=base_norm, color='gray', linestyle='--', alpha=0.3)
         ax.axis('off')
         st.pyplot(fig)
 
-st.write("Метод: Раздельный мониторинг ионосферных аномалий и литосферной активности.")
+st.write("Метод: Статистически согласованный анализ (Z-score) с учетом широты и сезона.")
