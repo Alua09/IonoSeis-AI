@@ -5,6 +5,7 @@ import requests
 import math
 import time
 import pandas as pd
+import os
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
@@ -39,25 +40,25 @@ def get_diurnal_trend(hour, lat, date):
 # --- ИНТЕРФЕЙС ---
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
-# Сайдбар
 st.sidebar.header("🔧 Режимы работы")
 mode = st.sidebar.radio("Выберите режим:", ["Реальное время", "Архивный анализ"])
 
 kp = get_current_kp_index()
 st.info(f"🌐 Глобальный геомагнитный индекс (Kp): **{kp}**")
 
-# Загрузка архива (если выбран архив)
-uploaded_file = None
+# Попытка автозагрузки архива
+df = None
 if mode == "Архивный анализ":
-    uploaded_file = st.sidebar.file_uploader("Загрузить файл CSV с данными", type="csv")
+    if os.path.exists("historical_data.csv"):
+        df = pd.read_csv("historical_data.csv")
+        st.sidebar.success("Архивный файл (historical_data.csv) загружен автоматически.")
+    else:
+        st.sidebar.error("Файл historical_data.csv не найден в папке проекта!")
 
-# Основной цикл
 for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
 
-    # Определение времени и данных
-    if mode == "Архивный анализ" and uploaded_file:
-        df = pd.read_csv(uploaded_file)
+    if mode == "Архивный анализ" and df is not None:
         val = df[df['city'] == city]['vtec'].iloc[0] if city in df['city'].values else 15.0
         local_now = datetime.now()
     else:
@@ -66,18 +67,16 @@ for city, (lat, lon, offset) in CITIES.items():
         val = base + np.random.normal(0, 0.5 + (kp * 0.1))
 
     base_norm = get_diurnal_trend(local_now.hour + local_now.minute / 60, lat, local_now)
-
-    # Обновление истории
     st.session_state.history[city].append(val)
     if len(st.session_state.history[city]) > 50: st.session_state.history[city].pop(0)
 
     z = (val - base_norm) / (1.5 + (kp * 0.2))
 
-    # Визуализация (Колонки определены внутри цикла)
     col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
 
     with col1:
         st.subheader(f"📍 {city}")
+        st.caption(f"🕒 Время: {local_now.strftime('%H:%M:%S')}")  # ВЕРНУЛИ ВРЕМЯ
         st.metric("VTEC (TECU)", f"{val:.1f}", f"{z:.1f}σ")
 
     with col2:
@@ -102,5 +101,3 @@ for city, (lat, lon, offset) in CITIES.items():
 if mode == "Реальное время":
     time.sleep(5)
     st.rerun()
-
-st.write("Метод: Статистический Z-анализ ионосферы относительно динамической модели.")
