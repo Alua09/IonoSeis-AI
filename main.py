@@ -37,19 +37,7 @@ def get_diurnal_trend(hour, lat, date):
     return round(diurnal * (math.cos(math.radians(lat))) * seasonal, 1)
 
 
-# --- ИНТЕРФЕЙС ---
-st.title("🛰 IonoSeis AI: Экспертный мониторинг")
-
-st.sidebar.header("🔧 Режимы работы")
-mode = st.sidebar.radio("Выберите режим:", ["Реальное время", "Архивный анализ"])
-
-kp = get_current_kp_index()
-st.info(f"🌐 Глобальный геомагнитный индекс (Kp): **{kp}**")
-
-
-# Функция воспроизведения звука
 def play_alert_sound():
-    # Используем встроенный в браузер системный звук (beep) через HTML5
     sound_html = """
     <audio autoplay="true" style="display:none;">
         <source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg">
@@ -58,21 +46,29 @@ def play_alert_sound():
     st.components.v1.html(sound_html, height=0)
 
 
-# Попытка автозагрузки архива
+# --- ИНТЕРФЕЙС ---
+st.title("🛰 IonoSeis AI: Экспертный мониторинг")
+
+st.sidebar.header("🔧 Настройки")
+mode = st.sidebar.radio("Режим:", ["Реальное время", "Архивный анализ"])
+sensitivity = st.sidebar.slider("Порог чувствительности (Z-score)", 0.5, 2.0, 1.0, 0.1)
+
+kp = get_current_kp_index()
+st.info(f"🌐 Геомагнитный индекс (Kp): **{kp}**")
+
 df = None
 if mode == "Архивный анализ":
     if os.path.exists("historical_data.csv"):
         df = pd.read_csv("historical_data.csv")
-        st.sidebar.success("Архивный файл (historical_data.csv) загружен.")
     else:
-        st.sidebar.error("Файл historical_data.csv не найден!")
+        st.error("Файл 'historical_data.csv' не найден!")
 
 found_anomaly = False
 
-# Основной цикл
 for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
 
+    # Логика данных
     if mode == "Архивный анализ" and df is not None:
         val = df[df['city'] == city]['vtec'].iloc[0] if city in df['city'].values else 15.0
         local_now = datetime.now()
@@ -87,7 +83,6 @@ for city, (lat, lon, offset) in CITIES.items():
 
     z = (val - base_norm) / (1.5 + (kp * 0.2))
 
-    # Визуализация
     col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
 
     with col1:
@@ -97,7 +92,7 @@ for city, (lat, lon, offset) in CITIES.items():
 
     with col2:
         st.write(f"Норма: **{base_norm} TECU**")
-        if abs(z) > 1.5:
+        if abs(z) > sensitivity:
             st.warning("⚠️ АНОМАЛИЯ")
             found_anomaly = True
         else:
@@ -105,19 +100,15 @@ for city, (lat, lon, offset) in CITIES.items():
 
     with col3:
         st.write("Сейсмика:")
-        if found_anomaly:
-            st.error("ВНИМАНИЕ!")
-        else:
-            st.success("Спокойно")
+        st.success("Спокойно")
 
     with col4:
         fig, ax = plt.subplots(figsize=(6, 1.2))
-        ax.plot(st.session_state.history[city], color='red' if abs(z) > 1.5 else 'cyan', linewidth=2)
+        ax.plot(st.session_state.history[city], color='red' if abs(z) > sensitivity else 'cyan', linewidth=2)
         ax.axhline(y=base_norm, color='gray', linestyle='--', alpha=0.5, label=f'Norm: {base_norm}')
         ax.axis('off')
         st.pyplot(fig)
 
-# Активация звука, если нашли аномалию в текущем цикле
 if found_anomaly and mode == "Реальное время":
     play_alert_sound()
 
@@ -125,4 +116,4 @@ if mode == "Реальное время":
     time.sleep(5)
     st.rerun()
 
-st.write("Метод: Статистический Z-анализ ионосферы относительно динамической модели.")
+st.write("Метод: Статистический Z-анализ ионосферы.")
