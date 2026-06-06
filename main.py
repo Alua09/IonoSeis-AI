@@ -6,7 +6,6 @@ import math
 import time
 import pandas as pd
 import os
-import base64
 from gtts import gTTS
 from datetime import datetime, timezone, timedelta
 
@@ -40,21 +39,20 @@ def get_diurnal_trend(hour, lat, date):
 
 
 def play_voice_alert(city_name):
-    # Генерируем текст уведомления
+    # Генерация уникального ключа через время
+    unique_id = int(time.time())
     text = f"Внимание! Наблюдается аномалия в городе {city_name}"
     tts = gTTS(text=text, lang='ru')
-    tts.save("alert.mp3")
+    filename = f"alert_{unique_id}.mp3"
+    tts.save(filename)
 
-    # Кодируем в base64
-    with open("alert.mp3", "rb") as f:
-        data = base64.b64encode(f.read()).decode()
+    # Воспроизведение через встроенный плеер Streamlit
+    audio_file = open(filename, 'rb')
+    audio_bytes = audio_file.read()
+    st.audio(audio_bytes, format='audio/mp3', autoplay=True)
 
-    audio_html = f'''
-    <audio autoplay="true">
-        <source src="data:audio/mp3;base64,{data}" type="audio/mp3">
-    </audio>
-    '''
-    st.components.v1.html(audio_html, height=0)
+    # Удаление файла после проигрывания (опционально)
+    # os.remove(filename)
 
 
 # --- ИНТЕРФЕЙС ---
@@ -78,7 +76,6 @@ if mode == "Архивный анализ":
 for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
 
-    # Расчет данных
     if mode == "Архивный анализ" and df is not None:
         val = df[df['city'] == city]['vtec'].iloc[0] if city in df['city'].values else 15.0
         local_now = datetime.now()
@@ -105,7 +102,7 @@ for city, (lat, lon, offset) in CITIES.items():
         if abs(z) > sensitivity:
             st.warning("⚠️ АНОМАЛИЯ")
             if mode == "Реальное время":
-                play_voice_alert(city)  # Голосовой сигнал
+                play_voice_alert(city)
         else:
             st.info("✅ Стабильно")
 
