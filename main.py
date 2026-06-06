@@ -6,6 +6,7 @@ import math
 import time
 import pandas as pd
 import os
+import base64
 from gtts import gTTS
 from datetime import datetime, timezone, timedelta
 
@@ -22,7 +23,7 @@ if 'history' not in st.session_state:
     st.session_state.history = {city: [] for city in CITIES}
 
 
-# --- НАУЧНЫЕ И ГОЛОСОВЫЕ ФУНКЦИИ ---
+# --- ФУНКЦИИ ---
 def get_current_kp_index():
     try:
         resp = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
@@ -39,20 +40,18 @@ def get_diurnal_trend(hour, lat, date):
 
 
 def play_voice_alert(city_name):
-    # Генерация уникального ключа через время
-    unique_id = int(time.time())
+    # Генерация уникального файла для каждого события
+    timestamp = int(time.time())
+    filename = f"alert_{city_name}_{timestamp}.mp3"
     text = f"Внимание! Наблюдается аномалия в городе {city_name}"
+
     tts = gTTS(text=text, lang='ru')
-    filename = f"alert_{unique_id}.mp3"
     tts.save(filename)
 
-    # Воспроизведение через встроенный плеер Streamlit
+    # Воспроизведение через встроенный компонент
     audio_file = open(filename, 'rb')
     audio_bytes = audio_file.read()
     st.audio(audio_bytes, format='audio/mp3', autoplay=True)
-
-    # Удаление файла после проигрывания (опционально)
-    # os.remove(filename)
 
 
 # --- ИНТЕРФЕЙС ---
