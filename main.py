@@ -6,6 +6,8 @@ import math
 import time
 import pandas as pd
 import os
+import base64
+from gtts import gTTS
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
@@ -21,7 +23,7 @@ if 'history' not in st.session_state:
     st.session_state.history = {city: [] for city in CITIES}
 
 
-# --- НАУЧНЫЕ ФУНКЦИИ ---
+# --- НАУЧНЫЕ И ГОЛОСОВЫЕ ФУНКЦИИ ---
 def get_current_kp_index():
     try:
         resp = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
@@ -37,13 +39,22 @@ def get_diurnal_trend(hour, lat, date):
     return round(diurnal * (math.cos(math.radians(lat))) * seasonal, 1)
 
 
-def play_alert_sound():
-    sound_html = """
-    <audio autoplay="true" style="display:none;">
-        <source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg">
+def play_voice_alert(city_name):
+    # Генерируем текст уведомления
+    text = f"Внимание! Наблюдается аномалия в городе {city_name}"
+    tts = gTTS(text=text, lang='ru')
+    tts.save("alert.mp3")
+
+    # Кодируем в base64
+    with open("alert.mp3", "rb") as f:
+        data = base64.b64encode(f.read()).decode()
+
+    audio_html = f'''
+    <audio autoplay="true">
+        <source src="data:audio/mp3;base64,{data}" type="audio/mp3">
     </audio>
-    """
-    st.components.v1.html(sound_html, height=0)
+    '''
+    st.components.v1.html(audio_html, height=0)
 
 
 # --- ИНТЕРФЕЙС ---
@@ -63,12 +74,11 @@ if mode == "Архивный анализ":
     else:
         st.error("Файл 'historical_data.csv' не найден!")
 
-found_anomaly = False
-
+# ОСНОВНОЙ ЦИКЛ
 for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
 
-    # Логика данных
+    # Расчет данных
     if mode == "Архивный анализ" and df is not None:
         val = df[df['city'] == city]['vtec'].iloc[0] if city in df['city'].values else 15.0
         local_now = datetime.now()
@@ -94,7 +104,8 @@ for city, (lat, lon, offset) in CITIES.items():
         st.write(f"Норма: **{base_norm} TECU**")
         if abs(z) > sensitivity:
             st.warning("⚠️ АНОМАЛИЯ")
-            found_anomaly = True
+            if mode == "Реальное время":
+                play_voice_alert(city)  # Голосовой сигнал
         else:
             st.info("✅ Стабильно")
 
@@ -108,9 +119,6 @@ for city, (lat, lon, offset) in CITIES.items():
         ax.axhline(y=base_norm, color='gray', linestyle='--', alpha=0.5, label=f'Norm: {base_norm}')
         ax.axis('off')
         st.pyplot(fig)
-
-if found_anomaly and mode == "Реальное время":
-    play_alert_sound()
 
 if mode == "Реальное время":
     time.sleep(5)
