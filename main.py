@@ -21,6 +21,7 @@ CITIES = {
 
 if 'history' not in st.session_state:
     st.session_state.history = {city: [] for city in CITIES}
+    st.session_state.audio_activated = False
 
 
 # --- ФУНКЦИИ ---
@@ -39,23 +40,33 @@ def get_diurnal_trend(hour, lat, date):
     return round(diurnal * (math.cos(math.radians(lat))) * seasonal, 1)
 
 
-def play_voice_alert(city_name):
-    # Генерация уникального файла для каждого события
-    timestamp = int(time.time())
-    filename = f"alert_{city_name}_{timestamp}.mp3"
+def play_voice_alert_js(city_name):
+    # Генерируем звук
     text = f"Внимание! Наблюдается аномалия в городе {city_name}"
-
     tts = gTTS(text=text, lang='ru')
+    filename = "temp_alert.mp3"
     tts.save(filename)
 
-    # Воспроизведение через встроенный компонент
-    audio_file = open(filename, 'rb')
-    audio_bytes = audio_file.read()
-    st.audio(audio_bytes, format='audio/mp3', autoplay=True)
+    with open(filename, "rb") as f:
+        data = base64.b64encode(f.read()).decode()
+
+    # JS для принудительного воспроизведения
+    js_code = f'''
+    <script>
+        var audio = new Audio("data:audio/mp3;base64,{data}");
+        audio.play();
+    </script>
+    '''
+    st.components.v1.html(js_code, height=0)
 
 
 # --- ИНТЕРФЕЙС ---
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
+
+# Кнопка для "разблокировки" звука
+if st.button("🔊 Активировать систему звуковых оповещений"):
+    st.session_state.audio_activated = True
+    st.success("Система активирована. Оповещения включены.")
 
 st.sidebar.header("🔧 Настройки")
 mode = st.sidebar.radio("Режим:", ["Реальное время", "Архивный анализ"])
@@ -100,8 +111,8 @@ for city, (lat, lon, offset) in CITIES.items():
         st.write(f"Норма: **{base_norm} TECU**")
         if abs(z) > sensitivity:
             st.warning("⚠️ АНОМАЛИЯ")
-            if mode == "Реальное время":
-                play_voice_alert(city)
+            if mode == "Реальное время" and st.session_state.audio_activated:
+                play_voice_alert_js(city)
         else:
             st.info("✅ Стабильно")
 
