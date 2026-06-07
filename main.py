@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import requests
 import math
 import time
+import streamlit.components.v1 as components
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
@@ -17,7 +18,6 @@ CITIES = {
 
 if 'history' not in st.session_state:
     st.session_state.history = {city: [] for city in CITIES}
-    # Хранилище для состояний аномалий, чтобы не спамить уведомлениями каждую секунду
     st.session_state.last_alert = {city: False for city in CITIES}
 
 
@@ -72,11 +72,15 @@ for city, (lat, lon, offset) in CITIES.items():
 
     z = (val - base_norm) / (1.5 + (kp * 0.2))
 
-    # --- ЛОГИКА ОПОВЕЩЕНИЯ ---
+    # Логика аномалий со звуком
     is_anomaly = abs(z) > 1.5
     if is_anomaly and not st.session_state.last_alert[city]:
-        st.toast(f"⚠️ Внимание! Наблюдается аномалия в городе {city}", icon="🚨")
-        st.session_state.last_alert[city] = True  # Блокируем повтор, чтобы не спамить
+        st.toast(f"⚠️ Внимание! Аномалия в городе {city}", icon="🚨")
+        # Звуковой сигнал
+        components.html(
+            """<audio autoplay="true"><source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg"></audio>""",
+            height=0)
+        st.session_state.last_alert[city] = True
     elif not is_anomaly:
         st.session_state.last_alert[city] = False
 
