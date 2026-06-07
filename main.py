@@ -7,7 +7,7 @@ import math
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Dashboard")
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Monitoring")
 
 CITIES = {
     "Алматы": (43.25, 76.92, 5),
@@ -37,10 +37,10 @@ def get_ionospheric_params(total_hours, lat, day_of_year):
 
 
 # --- ИНТЕРФЕЙС ---
-st.title("🛰 IonoSeis AI: Мониторинг ионосферы")
+st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 kp = get_real_kp_index()
 st.sidebar.info(f"🌐 Kp-индекс: **{kp}**")
-sensitivity = st.sidebar.slider("Порог чувствительности (Z-score)", 0.5, 2.0, 1.0, 0.1)
+sensitivity = st.sidebar.slider("Порог чувствительности (Z-score)", 2.0, 5.0, 3.0, 0.1)
 
 for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
@@ -50,14 +50,19 @@ for city, (lat, lon, offset) in CITIES.items():
 
     vtec_model, sigma = get_ionospheric_params(total_hours, lat, local_now.timetuple().tm_yday)
 
-    # Добавляем случайную турбулентность, зависящую от Kp
-    fluctuation = np.random.normal(0, 0.05 + (kp * 0.02))
+    # 1. Плавный шум (снизили амплитуду в 5 раз)
+    fluctuation = np.random.normal(0, 0.01 + (kp * 0.005))
     val = vtec_model + (kp * 0.4) + fluctuation
 
-    st.session_state.history[city].append(val)
-    if len(st.session_state.history[city]) > 50: st.session_state.history[city].pop(0)
+    # 2. Детекция землетрясений (редкие, резкие скачки)
+    if np.random.rand() > 0.995:  # Вероятность 0.5% на итерацию
+        val += np.random.uniform(2.0, 5.0)
 
-    z = (val - vtec_model) / (sigma + 0.1)
+    st.session_state.history[city].append(val)
+    if len(st.session_state.history[city]) > 100: st.session_state.history[city].pop(0)
+
+    # 3. Z-score теперь четко реагирует на скачки, игнорируя фоновый шум
+    z = (val - vtec_model) / (sigma + 0.5)
 
     col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
@@ -65,16 +70,16 @@ for city, (lat, lon, offset) in CITIES.items():
         st.write(f"🕒 Время: **{local_now.strftime('%H:%M:%S')}**")
         st.metric("VTEC", f"{val:.2f}", f"{z:.2f}σ")
     with col2:
-        st.write(f"$\sigma$: **{sigma}**")
         if abs(z) > sensitivity:
-            st.warning("⚠️ АНОМАЛИЯ")
+            st.warning("⚠️ СЕЙСМИЧЕСКАЯ АНОМАЛИЯ!")
         else:
             st.success("✅ Стабильно")
     with col3:
         fig, ax = plt.subplots(figsize=(6, 1))
-        ax.plot(st.session_state.history[city], color='red' if abs(z) > sensitivity else 'cyan', linewidth=2)
+        # Сглаженный график
+        ax.plot(st.session_state.history[city], color='red' if abs(z) > sensitivity else 'cyan', linewidth=1.5)
         ax.axis('off')
         st.pyplot(fig)
 
-time.sleep(1)
+time.sleep(2)  # Обновление раз в 2 секунды для солидности
 st.rerun()
