@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import requests
 import time
+import streamlit.components.v1 as components
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
@@ -16,61 +17,88 @@ CITIES = {
 
 if 'history' not in st.session_state:
     st.session_state.history = {city: [] for city in CITIES}
+    st.session_state.last_alert = {city: False for city in CITIES}
 
 
-# --- ФУНКЦИИ ---
-def get_space_weather():
+# --- НАУЧНЫЕ ФУНКЦИИ ---
+def get_space_weather_data():
     try:
-        f107 = float(requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
-                                  timeout=3).json()[-1][1])
-        kp = float(
-            requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=3).json()[-1][
-                1])
+        resp_f107 = requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
+                                 timeout=5).json()
+        f107 = float(resp_f107[-1][1])
+        resp_kp = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
+        kp = float(resp_kp[-1][1])
         return kp, f107
     except:
         return 2.0, 150.0
 
 
+def get_diurnal_trend(hour, lat, f107):
+    ionization_base = 8.0 + (f107 / 20.0)
+    diurnal = ionization_base + 15.0 * np.cos(np.pi * (hour - 14) / 12)
+    return round(diurnal * (np.cos(np.radians(lat))), 1)
+
+
 # --- ИНТЕРФЕЙС ---
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
-tab1, tab2 = st.tabs(["🟢 Мониторинг (Live)", "📂 Архив сейсмических данных"])
+tab1, tab2 = st.tabs(["🟢 Мониторинг (Live)", "📂 Архив землетрясений"])
 
 with tab1:
-    kp, f107 = get_space_weather()
-    st.info(f"🌐 Kp-индекс: {kp} | ☀️ F10.7: {f107}")
+    kp, f107 = get_space_weather_data()
+    st.info(f"🌐 Kp: {kp} | ☀️ F10.7: {f107}")
 
     for city, (lat, lon, offset) in CITIES.items():
-        val = 10 + np.random.normal(0, 1)
+        local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
+        hour = local_time.hour + local_time.minute / 60.0
+
+        base_norm = get_diurnal_trend(hour, lat, f107)
+        val = base_norm + np.random.normal(0, 0.5 + (kp * 0.1))
+
         st.session_state.history[city].append(val)
         if len(st.session_state.history[city]) > 50: st.session_state.history[city].pop(0)
 
-        col1, col2 = st.columns([1, 3])
-        col1.metric(f"📍 {city}", f"{val:.1f} VTEC")
-        fig, ax = plt.subplots(figsize=(6, 1))
-        ax.plot(st.session_state.history[city], color='cyan')
+        z = (val - base_norm) / 1.5
+        is_anomaly = abs(z) > 1.5
+
+        if is_anomaly and not st.session_state.last_alert[city]:
+            st.toast(f"⚠️ Аномалия в {city}!", icon="🚨")
+            st.session_state.last_alert[city] = True
+        elif not is_anomaly:
+            st.session_state.last_alert[city] = False
+
+        col1, col2, col3 = st.columns([1, 1, 2])
+        col1.metric(f"📍 {city}", f"{val:.1f} VTEC", f"{z:.1f}σ")
+        col2.write("Статус: " + ("⚠️ АНОМАЛИЯ" if is_anomaly else "✅ Стабильно"))
+
+        fig, ax = plt.subplots(figsize=(5, 1))
+        ax.plot(st.session_state.history[city], color='red' if is_anomaly else 'cyan')
+        ax.set_ylim(0, 50)
         ax.axis('off')
-        col2.pyplot(fig)
-    time.sleep(2)
+        col3.pyplot(fig)
+
+    time.sleep(3)
     st.rerun()
 
 with tab2:
-    st.subheader("Поиск архивных сейсмических данных")
-    with st.form("archive"):
+    st.subheader("Поиск архивных данных")
+    with st.form("archive_form"):
         city_sel = st.selectbox("Город:", list(CITIES.keys()))
-        date_sel = st.date_input("Дата начала:", datetime.now() - timedelta(days=7))
-        submit = st.form_submit_button("Найти события")
+        date_sel = st.date_input("Дата поиска:", datetime.now() - timedelta(days=7))
+        submitted = st.form_submit_button("Найти события")
 
-    if submit:
+    if submitted:
         lat, lon = CITIES[city_sel][0], CITIES[city_sel][1]
         url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={date_sel.isoformat()}&endtime={(date_sel + timedelta(days=30)).isoformat()}&latitude={lat}&longitude={lon}&maxradiuskm=1000&minmagnitude=2.0"
 
         try:
-            data = requests.get(url, timeout=10).json()
-            features = data.get('features', [])
-            st.write(f"Найдено событий: **{len(features)}**")
-            for f in features[:10]:
-                p = f['properties']
-                st.write(
-                    f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d %H:%M')} | 📍 {p['place']} | ⚡ Магнитуда: **{p['mag']}**")
+            res = requests.get(url, timeout=10).json()
+            features = res.get('features', [])
+            if features:
+                for f in features[:10]:
+                    p = f['properties']
+                    st.write(
+                        f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d')} | 📍 {p['place']} | ⚡ {p['mag']} M")
+            else:
+                st.write("Событий не найдено.")
         except Exception as e:
-            st.error(f"Ошибка загрузки: {e}")
+            st.error(f"Ошибка: {e}")
