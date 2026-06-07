@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 # --- КОНФИГУРАЦИЯ ---
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Dashboard")
 
+# Города: широта, долгота, смещение UTC
 CITIES = {
     "Алматы": (43.25, 76.92, 5),
     "Бишкек": (42.87, 74.59, 6),
@@ -23,6 +24,7 @@ if 'history' not in st.session_state:
 
 # --- НАУЧНЫЕ ФУНКЦИИ ---
 def get_space_weather_data():
+    """Получение реальных данных Kp и F10.7 из NOAA."""
     try:
         resp_f107 = requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
                                  timeout=5).json()
@@ -51,8 +53,10 @@ def moving_average(data, window=5):
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
 kp, f107 = get_space_weather_data()
-st.info(f"🌐 Kp-индекс: **{kp}** | ☀️ Солнечный поток (F10.7): **{f107}**")
+kp_status = "⚠️ Повышен" if kp > 4 else "✅ Спокойно"
+st.info(f"🌐 Kp-индекс: **{kp}** ({kp_status}) | ☀️ Солнечный поток (F10.7): **{f107}**")
 
+# Запрос к USGS
 try:
     quakes = requests.get("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=" +
                           (datetime.now() - timedelta(days=1)).isoformat(), timeout=5).json()
@@ -64,6 +68,7 @@ for city, (lat, lon, offset) in CITIES.items():
     local_now = datetime.now(timezone.utc) + timedelta(hours=offset)
     hour = local_now.hour + local_now.minute / 60.0
 
+    # 1. Расчеты
     base_norm = get_diurnal_trend(hour, lat, local_now, f107)
     val = base_norm + np.random.normal(0, 0.5 + (kp * 0.1))
 
@@ -72,11 +77,10 @@ for city, (lat, lon, offset) in CITIES.items():
 
     z = (val - base_norm) / (1.5 + (kp * 0.2))
 
-    # Логика аномалий со звуком
+    # 2. Логика аномалий и звука
     is_anomaly = abs(z) > 1.5
     if is_anomaly and not st.session_state.last_alert[city]:
         st.toast(f"⚠️ Внимание! Аномалия в городе {city}", icon="🚨")
-        # Звуковой сигнал
         components.html(
             """<audio autoplay="true"><source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg"></audio>""",
             height=0)
