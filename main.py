@@ -52,15 +52,10 @@ st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
 tab1, tab2 = st.tabs(["🟢 Мониторинг (Live)", "📂 Архив землетрясений"])
 
+# --- ВКЛАДКА 1: LIVE ---
 with tab1:
     kp, f107 = get_space_weather_data()
     st.info(f"🌐 Kp-индекс: **{kp}** | ☀️ Солнечный поток (F10.7): **{f107}**")
-
-    try:
-        quakes = requests.get("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=" +
-                              (datetime.now() - timedelta(days=1)).isoformat(), timeout=5).json()
-    except:
-        quakes = {'features': []}
 
     for city, (lat, lon, offset) in CITIES.items():
         st.markdown("---")
@@ -99,7 +94,6 @@ with tab1:
         col3.write("Сейсмика:")
         col3.success("✅ Спокойно")
 
-        # Отрисовка графика с принудительным масштабом
         fig, ax = plt.subplots(figsize=(6, 1.2))
         data = moving_average(st.session_state.history[city], 5)
         ax.plot(data, color='red' if is_anomaly else 'cyan', linewidth=2.5)
@@ -108,13 +102,21 @@ with tab1:
         ax.axis('off')
         col4.pyplot(fig)
 
+    time.sleep(5)
+    st.rerun()
+
+# --- ВКЛАДКА 2: АРХИВ ---
 with tab2:
-    st.subheader("Поиск архивных сейсмических данных (Алматы)")
-    target_date = st.date_input("Выберите дату для проверки", datetime.now() - timedelta(days=1))
+    st.subheader("Поиск архивных сейсмических данных")
+    city_choice = st.selectbox("Выберите город:", list(CITIES.keys()))
+    target_date = st.date_input("Выберите дату:", datetime.now() - timedelta(days=1))
+
     if st.button("Проверить архив"):
+        lat, lon, _ = CITIES[city_choice]
         start = datetime.combine(target_date, datetime.min.time()).isoformat()
         end = datetime.combine(target_date, datetime.max.time()).isoformat()
-        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={start}&endtime={end}&latitude={CITIES['Алматы'][0]}&longitude={CITIES['Алматы'][1]}&maxradiuskm=500"
+        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={start}&endtime={end}&latitude={lat}&longitude={lon}&maxradiuskm=500"
+
         try:
             res = requests.get(url, timeout=5).json()
             features = res.get('features', [])
@@ -127,11 +129,9 @@ with tab2:
                         f"⚠️ M{p['mag']} | {p['place']} | {datetime.fromtimestamp(p['time'] / 1000).strftime('%H:%M:%S')}")
                 fig, ax = plt.subplots(figsize=(10, 3))
                 ax.bar(times, mags, color='orange', alpha=0.7)
+                ax.set_title(f"Сейсмичность: {city_choice} за {target_date}")
                 st.pyplot(fig)
             else:
-                st.success("В этот день крупных событий не зафиксировано.")
+                st.success(f"В этот день крупных событий в радиусе 500 км от {city_choice} нет.")
         except Exception as e:
-            st.error(f"Ошибка: {e}")
-
-time.sleep(5)
-st.rerun()
+            st.error(f"Ошибка получения данных: {e}")
