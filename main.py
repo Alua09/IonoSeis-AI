@@ -9,7 +9,6 @@ from datetime import datetime, timezone, timedelta
 # --- КОНФИГУРАЦИЯ ---
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Dashboard")
 
-# Смещение UTC для городов: (Широта, Долгота, Смещение от UTC)
 CITIES = {
     "Алматы": (43.25, 76.92, 5),
     "Бишкек": (42.87, 74.59, 6),
@@ -19,39 +18,39 @@ CITIES = {
 if 'history' not in st.session_state:
     st.session_state.history = {city: [] for city in CITIES}
 
-
 # --- НАУЧНЫЕ ФУНКЦИИ ---
-def get_current_kp_index():
-    """Получение реального Kp-индекса с сервиса NOAA."""
+def get_space_weather_data():
+    """Получение Kp и F10.7 из NOAA."""
     try:
-        resp = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
-        return float(resp[-1][1])
+        resp_f107 = requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json", timeout=5).json()
+        f107 = float(resp_f107[-1][1])
+        resp_kp = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
+        kp = float(resp_kp[-1][1])
+        return kp, f107
     except:
-        return 2.0
-
+        return 2.0, 150.0
 
 def get_dynamic_search_radius(mag):
     return 300 * (1.5 ** (mag - 5.0))
 
-
-def get_diurnal_trend(hour, lat, date):
+def get_diurnal_trend(hour, lat, date, f107):
     day_of_year = date.timetuple().tm_yday
     seasonal = 1.0 + 0.2 * math.sin(2 * math.pi * (day_of_year - 80) / 365)
-    diurnal = 10.0 + 15.0 * math.cos(math.pi * (hour - 14) / 12)
+    # Ионизация теперь прямо зависит от F10.7
+    ionization_base = 8.0 + (f107 / 20.0)
+    diurnal = ionization_base + 15.0 * math.cos(math.pi * (hour - 14) / 12)
     return round(diurnal * (math.cos(math.radians(lat))) * seasonal, 1)
-
 
 def moving_average(data, window=5):
     if len(data) < window: return data
     return np.convolve(data, np.ones(window) / window, mode='valid')
 
-
 # --- ИНТЕРФЕЙС ---
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
-kp = get_current_kp_index()
+kp, f107 = get_space_weather_data()
 kp_status = "⚠️ Повышен" if kp > 4 else "✅ Спокойно"
-st.info(f"🌐 Глобальный геомагнитный индекс (Kp): **{kp}** | Состояние: {kp_status}")
+st.info(f"🌐 Kp-индекс: **{kp}** ({kp_status}) | ☀️ Солнечный поток (F10.7): **{f107}**")
 
 # Сейсмика (USGS)
 try:
@@ -62,13 +61,11 @@ except:
 
 for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
-
-    # Расчет времени для конкретного города
     local_now = datetime.now(timezone.utc) + timedelta(hours=offset)
 
     # 1. Расчет
     hour = local_now.hour + local_now.minute / 60.0
-    base_norm = get_diurnal_trend(hour, lat, local_now)
+    base_norm = get_diurnal_trend(hour, lat, local_now, f107)
     val = base_norm + np.random.normal(0, 0.5 + (kp * 0.1))
 
     st.session_state.history[city].append(val)
@@ -88,7 +85,6 @@ for city, (lat, lon, offset) in CITIES.items():
 
     with col1:
         st.subheader(f"📍 {city}")
-        # Вывод локального времени с точностью до секунды
         st.caption(f"🕒 Время (Local): {local_now.strftime('%H:%M:%S')}")
         sign = "+" if z >= 0 else ""
         st.metric("VTEC (TECU)", f"{val:.1f}", f"{sign}{z:.1f}σ")
@@ -123,10 +119,11 @@ for city, (lat, lon, offset) in CITIES.items():
         ax.spines['bottom'].set_visible(False)
         ax.set_xticks([])
         ax.set_yticks([])
+        ax.axis('off')
 
         st.pyplot(fig)
 
-st.write("Метод: Статистический Z-анализ с адаптацией к геомагнитному фону (Kp-index) и сейсмической активностью.")
+st.write("Метод: Статистический Z-анализ с адаптацией к геомагнитному фону (Kp) и солнечному потоку (F10.7).")
 
 time.sleep(5)
 st.rerun()
