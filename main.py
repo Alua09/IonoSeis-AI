@@ -21,7 +21,7 @@ if 'history' not in st.session_state:
     st.session_state.last_alert = {city: False for city in CITIES}
 
 
-# --- НАУЧНЫЕ ФУНКЦИИ ---
+# --- ФУНКЦИИ ---
 def get_space_weather_data():
     try:
         resp_f107 = requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
@@ -61,7 +61,6 @@ with tab1:
         st.markdown("---")
         local_now = datetime.now(timezone.utc) + timedelta(hours=offset)
         hour = local_now.hour + local_now.minute / 60.0
-
         base_norm = get_diurnal_trend(hour, lat, local_now, f107)
         val = base_norm + np.random.normal(0, 0.5 + (kp * 0.1))
 
@@ -69,35 +68,21 @@ with tab1:
         if len(st.session_state.history[city]) > 50: st.session_state.history[city].pop(0)
 
         z = (val - base_norm) / (1.5 + (kp * 0.2))
-
         is_anomaly = abs(z) > 1.5
+
         if is_anomaly and not st.session_state.last_alert[city]:
-            st.toast(f"⚠️ Внимание! Аномалия в городе {city}", icon="🚨")
-            components.html(
-                """<audio autoplay="true"><source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg"></audio>""",
-                height=0)
+            st.toast(f"⚠️ Аномалия: {city}", icon="🚨")
             st.session_state.last_alert[city] = True
         elif not is_anomaly:
             st.session_state.last_alert[city] = False
 
         col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
-        col1.subheader(f"📍 {city}")
-        col1.metric("VTEC", f"{val:.1f}", f"{z:.1f}σ")
+        col1.metric(f"📍 {city}", f"{val:.1f} VTEC", f"{z:.1f}σ")
+        col2.write("Ионосфера: " + ("⚠️ АНОМАЛИЯ" if is_anomaly else "✅ Стабильно"))
+        col3.write("Сейсмика: ✅ Спокойно")
 
-        col2.write("Ионосфера:")
-        if is_anomaly:
-            col2.warning("⚠️ АНОМАЛИЯ")
-        else:
-            col2.info("✅ Стабильно")
-
-        col3.write("Сейсмика:")
-        col3.success("✅ Спокойно")
-
-        fig, ax = plt.subplots(figsize=(6, 1.2))
-        data = moving_average(st.session_state.history[city], 5)
-        ax.plot(data, color='red' if is_anomaly else 'cyan', linewidth=2.5)
-        ax.set_ylim(0, 50)
-        ax.set_xlim(0, 50)
+        fig, ax = plt.subplots(figsize=(6, 1))
+        ax.plot(moving_average(st.session_state.history[city], 5), color='red' if is_anomaly else 'cyan')
         ax.axis('off')
         col4.pyplot(fig)
 
@@ -106,38 +91,32 @@ with tab1:
 
 # --- ВКЛАДКА 2: АРХИВ ---
 with tab2:
-    st.subheader("Поиск архивных сейсмических данных")
+    st.subheader("Поиск архивных данных")
     with st.form("archive_form"):
-        city_choice = st.selectbox("Выберите город:", list(CITIES.keys()))
-        target_date = st.date_input("Выберите дату:", datetime.now() - timedelta(days=1))
-        submit_button = st.form_submit_button("Проверить архив")
+        city_sel = st.selectbox("Город:", list(CITIES.keys()))
+        date_sel = st.date_input("Дата поиска:", datetime.now() - timedelta(days=7))
+        btn = st.form_submit_button("Найти")
 
-    if submit_button:
-        lat, lon, _ = CITIES[city_choice]
-        start = datetime.combine(target_date, datetime.min.time()).isoformat()
-        end = datetime.combine(target_date, datetime.max.time()).isoformat()
-        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={start}&endtime={end}&latitude={lat}&longitude={lon}&maxradiuskm=2000&minmagnitude=0"
+    if btn:
+        lat, lon, _ = CITIES[city_sel]
+        # Расширяем поиск до 30 дней от выбранной даты для гарантированного результата
+        start_date = date_sel.isoformat()
+        end_date = (date_sel + timedelta(days=30)).isoformat()
+
+        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={start_date}&endtime={end_date}&latitude={lat}&longitude={lon}&maxradiuskm=1000&minmagnitude=2.0"
 
         try:
-            res = requests.get(url, timeout=10).json()
-            features = res.get('features', [])
+            data = requests.get(url, timeout=10).json()
+            features = data.get('features', [])
 
             if features:
-                st.success(f"Найдено событий: {len(features)}")
-                mags = [f['properties']['mag'] for f in features]
-                times = [datetime.fromtimestamp(f['properties']['time'] / 1000).strftime('%H:%M') for f in features]
-
-                for f in features:
+                st.success(f"Найдено {len(features)} событий")
+                for f in features[:10]:  # Вывод последних 10
                     p = f['properties']
                     st.write(
-                        f"⚠️ **M{p['mag']}** | {p['place']} | {datetime.fromtimestamp(p['time'] / 1000).strftime('%H:%M:%S')}")
-
-                fig, ax = plt.subplots(figsize=(10, 3))
-                ax.bar(times, mags, color='orange')
-                ax.set_title(f"Сейсмичность в радиусе 2000 км от {city_choice}")
-                st.pyplot(fig)
+                        f"• **{p['place']}** | Магнитуда: {p['mag']} | {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d')}")
             else:
-                st.warning(f"Данных за {target_date} нет. Попробуйте другую дату.")
-                st.write(f"Ссылка для ручной проверки: {url}")
+                st.write("Событий не найдено. Попробуйте сменить город.")
+                st.write(f"Ссылка: {url}")
         except Exception as e:
-            st.error(f"Ошибка запроса: {e}")
+            st.error(f"Ошибка: {e}")
