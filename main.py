@@ -52,7 +52,6 @@ st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
 tab1, tab2 = st.tabs(["🟢 Мониторинг (Live)", "📂 Архив землетрясений"])
 
-# --- ВКЛАДКА 1: LIVE ---
 with tab1:
     kp, f107 = get_space_weather_data()
     st.info(f"🌐 Kp-индекс: **{kp}** | ☀️ Солнечный поток (F10.7): **{f107}**")
@@ -87,57 +86,52 @@ with tab1:
             st.session_state.last_alert[city] = False
 
         col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
-        with col1:
-            st.subheader(f"📍 {city}")
-            st.caption(f"🕒 {local_now.strftime('%H:%M:%S')}")
-            st.metric("VTEC", f"{val:.1f}", f"{z:.1f}σ")
-        with col2:
-            st.write("Ионосфера:")
-            if is_anomaly:
-                st.warning("⚠️ АНОМАЛИЯ")
-            else:
-                st.info("✅ Стабильно")
-        with col3:
-            st.write("Сейсмика:")
-            st.success("✅ Спокойно")
-        with col4:
-            fig, ax = plt.subplots(figsize=(6, 1.2))
-            ax.plot(moving_average(st.session_state.history[city], 5), color='red' if is_anomaly else 'cyan',
-                    linewidth=2.5)
-            ax.axis('off')
-            st.pyplot(fig)
+        col1.subheader(f"📍 {city}")
+        col1.caption(f"🕒 {local_now.strftime('%H:%M:%S')}")
+        col1.metric("VTEC", f"{val:.1f}", f"{z:.1f}σ")
 
-    time.sleep(5)
-    st.rerun()
+        col2.write("Ионосфера:")
+        if is_anomaly:
+            col2.warning("⚠️ АНОМАЛИЯ")
+        else:
+            col2.info("✅ Стабильно")
 
-# --- ВКЛАДКА 2: АРХИВ ---
+        col3.write("Сейсмика:")
+        col3.success("✅ Спокойно")
+
+        # Отрисовка графика с принудительным масштабом
+        fig, ax = plt.subplots(figsize=(6, 1.2))
+        data = moving_average(st.session_state.history[city], 5)
+        ax.plot(data, color='red' if is_anomaly else 'cyan', linewidth=2.5)
+        ax.set_ylim(0, 50)
+        ax.set_xlim(0, 50)
+        ax.axis('off')
+        col4.pyplot(fig)
+
 with tab2:
     st.subheader("Поиск архивных сейсмических данных (Алматы)")
     target_date = st.date_input("Выберите дату для проверки", datetime.now() - timedelta(days=1))
-
     if st.button("Проверить архив"):
         start = datetime.combine(target_date, datetime.min.time()).isoformat()
         end = datetime.combine(target_date, datetime.max.time()).isoformat()
         url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={start}&endtime={end}&latitude={CITIES['Алматы'][0]}&longitude={CITIES['Алматы'][1]}&maxradiuskm=500"
-
         try:
             res = requests.get(url, timeout=5).json()
             features = res.get('features', [])
             if features:
                 mags = [f['properties']['mag'] for f in features]
                 times = [datetime.fromtimestamp(f['properties']['time'] / 1000).strftime('%H:%M') for f in features]
-
                 for f in features:
                     p = f['properties']
                     st.error(
                         f"⚠️ M{p['mag']} | {p['place']} | {datetime.fromtimestamp(p['time'] / 1000).strftime('%H:%M:%S')}")
-
                 fig, ax = plt.subplots(figsize=(10, 3))
                 ax.bar(times, mags, color='orange', alpha=0.7)
-                ax.set_title(f"Сейсмическая активность за {target_date}")
-                ax.set_ylabel("Магнитуда")
                 st.pyplot(fig)
             else:
-                st.success("В этот день крупных событий в радиусе 500 км не зафиксировано.")
+                st.success("В этот день крупных событий не зафиксировано.")
         except Exception as e:
-            st.error(f"Ошибка получения данных: {e}")
+            st.error(f"Ошибка: {e}")
+
+time.sleep(5)
+st.rerun()
