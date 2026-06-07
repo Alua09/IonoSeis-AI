@@ -8,10 +8,8 @@ import math
 from gtts import gTTS
 from datetime import datetime, timezone, timedelta
 
-# --- КОНФИГУРАЦИЯ ---
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Real-Time Expert")
 
-# Часовые пояса относительно UTC
 CITIES = {
     "Алматы": (43.25, 76.92, 5),
     "Бишкек": (42.87, 74.59, 6),
@@ -24,7 +22,6 @@ if 'audio_activated' not in st.session_state:
     st.session_state.audio_activated = False
 
 
-# --- ФУНКЦИИ ---
 def get_real_kp_index():
     try:
         resp = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
@@ -33,43 +30,31 @@ def get_real_kp_index():
         return 2.0
 
 
-def get_diurnal_trend(hour, lat, date):
+def get_diurnal_trend(total_hours, lat, date):
     day_of_year = date.timetuple().tm_yday
     seasonal = 1.0 + 0.2 * math.sin(2 * math.pi * (day_of_year - 80) / 365)
-    diurnal = 10.0 + 15.0 * math.cos(math.pi * (hour - 14) / 12)
-    return round(diurnal * (math.cos(math.radians(lat))) * seasonal, 1)
+    diurnal = 10.0 + 15.0 * math.cos(math.pi * (total_hours - 14) / 12)
+    return round(diurnal * (math.cos(math.radians(lat))) * seasonal, 2)
 
 
-def play_voice_alert_js(city_name):
-    text = f"Внимание! Наблюдается ионосферная аномалия в городе {city_name}"
-    tts = gTTS(text=text, lang='ru')
-    filename = "alert.mp3"
-    tts.save(filename)
-    with open(filename, "rb") as f:
-        data = base64.b64encode(f.read()).decode()
-    js_code = f'''<script>var audio = new Audio("data:audio/mp3;base64,{data}"); audio.play();</script>'''
-    st.components.v1.html(js_code, height=0)
+st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
-
-# --- ИНТЕРФЕЙС ---
-st.title("🛰 IonoSeis AI: Экспертный мониторинг (Live Data)")
-
-if st.button("🔊 Активировать систему звуковых оповещений"):
+if st.button("🔊 Активировать звуковые оповещения"):
     st.session_state.audio_activated = True
 
 sensitivity = st.sidebar.slider("Порог чувствительности (Z-score)", 0.5, 2.0, 1.0, 0.1)
 kp = get_real_kp_index()
-st.info(f"🌐 Реальный Kp-индекс NOAA: **{kp}**")
+st.info(f"🌐 Kp-индекс: **{kp}**")
 
-# Основной цикл
 for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
 
-    # Расчет времени и VTEC
-    local_now = datetime.now(timezone.utc) + timedelta(hours=offset)
-    base_norm = get_diurnal_trend(local_now.hour + local_now.minute / 60, lat, local_now)
+    # Берем точное время с точностью до секунд
+    now = datetime.now(timezone.utc) + timedelta(hours=offset)
+    total_hours = now.hour + now.minute / 60 + now.second / 3600
 
-    # Строго реальные данные без искусственного шума
+    # Теперь значение меняется каждую секунду
+    base_norm = get_diurnal_trend(total_hours, lat, now)
     val = base_norm + (kp * 0.5)
 
     st.session_state.history[city].append(val)
@@ -80,12 +65,11 @@ for city, (lat, lon, offset) in CITIES.items():
     col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
         st.subheader(f"📍 {city}")
-        st.write(f"🕒 Время: **{local_now.strftime('%H:%M')}**")
-        st.metric("VTEC", f"{val:.1f}", f"{z:.1f}σ")
+        st.write(f"🕒 Время: **{now.strftime('%H:%M:%S')}**")
+        st.metric("VTEC", f"{val:.2f}", f"{z:.2f}σ")
     with col2:
         if abs(z) > sensitivity:
             st.warning("⚠️ АНОМАЛИЯ")
-            if st.session_state.audio_activated: play_voice_alert_js(city)
         else:
             st.success("✅ Стабильно")
     with col3:
@@ -94,5 +78,5 @@ for city, (lat, lon, offset) in CITIES.items():
         ax.axis('off')
         st.pyplot(fig)
 
-time.sleep(5)
+time.sleep(1)  # Обновление каждую секунду
 st.rerun()
