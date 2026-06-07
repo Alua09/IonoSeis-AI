@@ -15,8 +15,10 @@ CITIES = {
     "Токио": (35.68, 139.65, 9)
 }
 
+# --- ИНИЦИАЛИЗАЦИЯ СОСТОЯНИЯ (САМОЕ ВАЖНОЕ) ---
 if 'history' not in st.session_state:
     st.session_state.history = {city: [] for city in CITIES}
+if 'last_alert' not in st.session_state:
     st.session_state.last_alert = {city: False for city in CITIES}
 
 
@@ -24,9 +26,9 @@ if 'history' not in st.session_state:
 def get_space_weather_data():
     try:
         resp_f107 = requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
-                                 timeout=5).json()
+                                 timeout=3).json()
         f107 = float(resp_f107[-1][1])
-        resp_kp = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
+        resp_kp = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=3).json()
         kp = float(resp_kp[-1][1])
         return kp, f107
     except:
@@ -54,12 +56,14 @@ with tab1:
         base_norm = get_diurnal_trend(hour, lat, f107)
         val = base_norm + np.random.normal(0, 0.5 + (kp * 0.1))
 
+        # Обновление истории
         st.session_state.history[city].append(val)
         if len(st.session_state.history[city]) > 50: st.session_state.history[city].pop(0)
 
         z = (val - base_norm) / 1.5
         is_anomaly = abs(z) > 1.5
 
+        # Логика алертов
         if is_anomaly and not st.session_state.last_alert[city]:
             st.toast(f"⚠️ Аномалия в {city}!", icon="🚨")
             st.session_state.last_alert[city] = True
@@ -83,7 +87,7 @@ with tab2:
     st.subheader("Поиск архивных данных")
     with st.form("archive_form"):
         city_sel = st.selectbox("Город:", list(CITIES.keys()))
-        date_sel = st.date_input("Дата поиска:", datetime.now() - timedelta(days=7))
+        date_sel = st.date_input("Дата начала:", datetime.now() - timedelta(days=7))
         submitted = st.form_submit_button("Найти события")
 
     if submitted:
@@ -101,4 +105,4 @@ with tab2:
             else:
                 st.write("Событий не найдено.")
         except Exception as e:
-            st.error(f"Ошибка: {e}")
+            st.error(f"Ошибка загрузки: {e}")
