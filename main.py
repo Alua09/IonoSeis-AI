@@ -124,11 +124,20 @@ with tab2:
             res = requests.get(url, timeout=5).json()
             features = res.get('features', [])
             if features:
+                mags = [f['properties']['mag'] for f in features]
+                times = [datetime.fromtimestamp(f['properties']['time'] / 1000).strftime('%H:%M') for f in features]
+
                 for f in features:
                     p = f['properties']
                     st.error(
                         f"⚠️ M{p['mag']} | {p['place']} | {datetime.fromtimestamp(p['time'] / 1000).strftime('%H:%M:%S')}")
+
+                fig, ax = plt.subplots(figsize=(10, 3))
+                ax.bar(times, mags, color='orange', alpha=0.7)
+                ax.set_title(f"Сейсмическая активность за {target_date}")
+                ax.set_ylabel("Магнитуда")
+                st.pyplot(fig)
             else:
                 st.success("В этот день крупных событий в радиусе 500 км не зафиксировано.")
         except Exception as e:
-            st.error(f"Ошибка: {e}")
+            st.error(f"Ошибка получения данных: {e}")
