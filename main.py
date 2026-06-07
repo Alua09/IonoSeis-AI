@@ -2,12 +2,12 @@ import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 import requests
-import time
 import math
+import time
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Monitoring")
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Scientific Expert")
 
 CITIES = {
     "Алматы": (43.25, 76.92, 5),
@@ -19,71 +19,76 @@ if 'history' not in st.session_state:
     st.session_state.history = {city: [] for city in CITIES}
 
 
-# --- ФУНКЦИИ ---
-def get_real_kp_index():
+# --- НАУЧНЫЕ ФУНКЦИИ ---
+def get_space_weather_data():
+    """Получает Kp и F10.7 из единого источника NOAA."""
     try:
-        resp = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
-        return float(resp[-1][1])
+        # NOAA F10.7 flux data
+        resp_f107 = requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
+                                 timeout=5).json()
+        f107 = float(resp_f107[-1][1])
+
+        # NOAA Kp index
+        resp_kp = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
+        kp = float(resp_kp[-1][1])
+
+        return kp, f107
     except:
-        return 2.0
+        return 2.0, 150.0  # Средние значения по умолчанию
 
 
-def get_seismic_activity(lat, lon):
-    try:
-        # Увеличили радиус для более "редких" событий, чтобы не спамило
-        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=5.5&limit=1"
-        data = requests.get(url, timeout=5).json()
-        if data['features']:
-            return data['features'][0]['properties']['mag']
-        return 0
-    except:
-        return 0
+def get_diurnal_trend(hour, lat, date, f107):
+    day_of_year = date.timetuple().tm_yday
+    seasonal = 1.0 + 0.2 * math.sin(2 * math.pi * (day_of_year - 80) / 365)
+    # Ионизация теперь прямо зависит от F10.7
+    ionization_base = 8.0 + (f107 / 20.0)
+    diurnal = ionization_base + 15.0 * math.cos(math.pi * (hour - 14) / 12)
+    return round(diurnal * (math.cos(math.radians(lat))) * seasonal, 1)
 
 
 # --- ИНТЕРФЕЙС ---
-st.title("🛰 IonoSeis AI: Мониторинг")
-kp = get_real_kp_index()
+st.title("🛰 IonoSeis AI: Анализ солнечного влияния")
+
+kp, f107 = get_space_weather_data()
+col_a, col_b = st.columns(2)
+col_a.metric("🌐 Kp-индекс", kp)
+col_b.metric("☀️ Поток F10.7", f107)
+
+# Сейсмика
+try:
+    quakes = requests.get("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=" +
+                          (datetime.now() - timedelta(days=1)).isoformat(), timeout=5).json()
+except:
+    quakes = {'features': []}
 
 for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
-
-    # 1. Индивидуальный расчет для каждого города
     local_now = datetime.now(timezone.utc) + timedelta(hours=offset)
-    total_hours = local_now.hour + local_now.minute / 60
+    hour = local_now.hour + local_now.minute / 60.0
 
-    # Модель VTEC с поправкой на широту (lat)
-    # Используем cos(lat), чтобы города на разных широтах имели разную "базу"
-    vtec_base = (10.0 + 15.0 * math.cos(math.pi * (total_hours - 14) / 12)) * math.cos(math.radians(lat))
-
-    # 2. Уникальная сигма для каждого города (зависит от широты)
-    sigma = 0.3 + (0.02 * lat / 10.0)
-
-    # 3. Получаем реальную сейсмику
-    mag = get_seismic_activity(lat, lon)
-
-    # VTEC = База + влияние Kp + сейсмический скачок
-    val = vtec_base + (kp * 0.3) + (mag * 5.0 if mag > 0 else np.random.normal(0, 0.05))
+    # 1. Расчет с учетом F10.7
+    base_norm = get_diurnal_trend(hour, lat, local_now, f107)
+    val = base_norm + np.random.normal(0, 0.5 + (kp * 0.1))
 
     st.session_state.history[city].append(val)
     if len(st.session_state.history[city]) > 50: st.session_state.history[city].pop(0)
 
-    z = (val - vtec_base) / sigma
+    z = (val - base_norm) / (1.5 + (kp * 0.2))
 
+    # 2. Визуализация и Сейсмика
     col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
         st.subheader(f"📍 {city}")
-        st.metric("VTEC", f"{val:.2f}", f"{z:.2f}σ")
+        st.metric("VTEC", f"{val:.1f}", f"{z:.1f}σ")
     with col2:
-        if mag > 0:
-            st.warning(f"⚠️ ЗЕМЛЕТРЯСЕНИЕ M{mag}!")
-        elif abs(z) > 1.8:  # Порог чувствительности
-            st.warning("⚠️ АНОМАЛИЯ ИОНОСФЕРЫ")
+        if abs(z) > 1.5:
+            st.warning("⚠️ АНОМАЛИЯ")
         else:
             st.success("✅ Стабильно")
     with col3:
         fig, ax = plt.subplots(figsize=(6, 1))
-        ax.plot(st.session_state.history[city], color='red' if abs(z) > 1.8 else 'cyan')
-        ax.axis('off')
+        ax.plot(st.session_state.history[city], color='red' if abs(z) > 1.5 else 'cyan')
+        st.axis('off')
         st.pyplot(fig)
 
 time.sleep(5)
