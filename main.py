@@ -82,7 +82,6 @@ with tab1:
 
         col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
         col1.subheader(f"📍 {city}")
-        col1.caption(f"🕒 {local_now.strftime('%H:%M:%S')}")
         col1.metric("VTEC", f"{val:.1f}", f"{z:.1f}σ")
 
         col2.write("Ионосфера:")
@@ -115,7 +114,8 @@ with tab2:
         lat, lon, _ = CITIES[city_choice]
         start = datetime.combine(target_date, datetime.min.time()).isoformat()
         end = datetime.combine(target_date, datetime.max.time()).isoformat()
-        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={start}&endtime={end}&latitude={lat}&longitude={lon}&maxradiuskm=500"
+        # Добавлен minmagnitude=0, чтобы видеть даже слабые события
+        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={start}&endtime={end}&latitude={lat}&longitude={lon}&maxradiuskm=1000&minmagnitude=0"
 
         try:
             res = requests.get(url, timeout=5).json()
@@ -129,9 +129,9 @@ with tab2:
                         f"⚠️ M{p['mag']} | {p['place']} | {datetime.fromtimestamp(p['time'] / 1000).strftime('%H:%M:%S')}")
                 fig, ax = plt.subplots(figsize=(10, 3))
                 ax.bar(times, mags, color='orange', alpha=0.7)
-                ax.set_title(f"Сейсмичность: {city_choice} за {target_date}")
+                ax.set_title(f"Сейсмичность в радиусе 1000 км от {city_choice} за {target_date}")
                 st.pyplot(fig)
             else:
-                st.success(f"В этот день крупных событий в радиусе 500 км от {city_choice} нет.")
+                st.success(f"В этот день событий в радиусе 1000 км от {city_choice} нет.")
         except Exception as e:
             st.error(f"Ошибка получения данных: {e}")
