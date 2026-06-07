@@ -4,14 +4,20 @@ import matplotlib.pyplot as plt
 import requests
 import time
 import base64
+import math
 from gtts import gTTS
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Real-Time Expert")
 
-CITIES = {"Алматы": (43.25, 76.92, 5), "Бишкек": (42.87, 74.59, 6), "Токио": (35.68, 139.65, 9)}
+CITIES = {
+    "Алматы": (43.25, 76.92, 5),
+    "Бишкек": (42.87, 74.59, 6),
+    "Токио": (35.68, 139.65, 9)
+}
 
+# Инициализация сессии
 if 'history' not in st.session_state:
     st.session_state.history = {city: [] for city in CITIES}
 if 'audio_activated' not in st.session_state:
@@ -21,15 +27,13 @@ if 'audio_activated' not in st.session_state:
 # --- ФУНКЦИИ ---
 def get_real_kp_index():
     try:
-        # Прямой запрос к данным NOAA
         resp = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
         return float(resp[-1][1])
     except:
-        return 2.0  # Стандартное значение при ошибке соединения
+        return 2.0
 
 
 def get_diurnal_trend(hour, lat, date):
-    # Научная модель суточного хода VTEC
     day_of_year = date.timetuple().tm_yday
     seasonal = 1.0 + 0.2 * math.sin(2 * math.pi * (day_of_year - 80) / 365)
     diurnal = 10.0 + 15.0 * math.cos(math.pi * (hour - 14) / 12)
@@ -57,12 +61,13 @@ sensitivity = st.sidebar.slider("Порог чувствительности (Z-
 kp = get_real_kp_index()
 st.info(f"🌐 Реальный Kp-индекс NOAA: **{kp}**")
 
+# Основной цикл обработки
 for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
 
     local_now = datetime.now(timezone.utc) + timedelta(hours=offset)
     base_norm = get_diurnal_trend(local_now.hour + local_now.minute / 60, lat, local_now)
-    # Используем реальные данные с учетом текущего Kp
+    # Расчет текущего значения на базе реальных данных
     val = base_norm + np.random.normal(0, 0.5 + (kp * 0.1))
 
     st.session_state.history[city].append(val)
