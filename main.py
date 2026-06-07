@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 import requests
 import math
 import time
-import pandas as pd
-import os
+import base64
+from gtts import gTTS
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
@@ -20,12 +20,13 @@ CITIES = {
 # Инициализация состояния
 if 'history' not in st.session_state:
     st.session_state.history = {city: [] for city in CITIES}
+if 'audio_activated' not in st.session_state:
+    st.session_state.audio_activated = False
 
 
 # --- ФУНКЦИИ ---
 def get_current_kp_index():
     try:
-        # Получаем данные о геомагнитной активности
         resp = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
         return float(resp[-1][1])
     except:
@@ -33,31 +34,52 @@ def get_current_kp_index():
 
 
 def get_diurnal_trend(hour, lat, date):
-    # Моделирование суточного хода VTEC
     day_of_year = date.timetuple().tm_yday
     seasonal = 1.0 + 0.2 * math.sin(2 * math.pi * (day_of_year - 80) / 365)
     diurnal = 10.0 + 15.0 * math.cos(math.pi * (hour - 14) / 12)
     return round(diurnal * (math.cos(math.radians(lat))) * seasonal, 1)
 
 
+def play_voice_alert_js(city_name):
+    # Генерация звука в base64
+    text = f"Внимание! Аномалия в городе {city_name}"
+    tts = gTTS(text=text, lang='ru')
+    filename = "temp_alert.mp3"
+    tts.save(filename)
+
+    with open(filename, "rb") as f:
+        data = base64.b64encode(f.read()).decode()
+
+    # JS-код для принудительного воспроизведения
+    js_code = f'''
+    <script>
+        var audio = new Audio("data:audio/mp3;base64,{data}");
+        audio.play();
+    </script>
+    '''
+    st.components.v1.html(js_code, height=0)
+
+
 # --- ИНТЕРФЕЙС ---
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
+# Кнопка для активации браузерного аудио-движка
+if st.button("🔊 Активировать систему звуковых оповещений"):
+    st.session_state.audio_activated = True
+    st.success("Система активирована. Звуковые оповещения включены.")
+
 st.sidebar.header("🔧 Настройки")
-mode = st.sidebar.radio("Режим:", ["Реальное время", "Архивный анализ"])
 sensitivity = st.sidebar.slider("Порог чувствительности (Z-score)", 0.5, 2.0, 1.0, 0.1)
 
 kp = get_current_kp_index()
-st.info(f"🌐 Текущий геомагнитный индекс (Kp): **{kp}**")
+st.info(f"🌐 Геомагнитный индекс (Kp): **{kp}**")
 
 # ОСНОВНОЙ ЦИКЛ
 for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
 
-    # Расчет данных
     local_now = datetime.now(timezone.utc) + timedelta(hours=offset)
     base_norm = get_diurnal_trend(local_now.hour + local_now.minute / 60, lat, local_now)
-    # Генерация данных с учетом Kp-индекса (шума)
     val = base_norm + np.random.normal(0, 0.5 + (kp * 0.1))
 
     st.session_state.history[city].append(val)
@@ -65,26 +87,25 @@ for city, (lat, lon, offset) in CITIES.items():
 
     z = (val - base_norm) / (1.5 + (kp * 0.2))
 
-    # Визуальное отображение
     col1, col2, col3 = st.columns([1, 1, 2])
 
     with col1:
         st.subheader(f"📍 {city}")
-        st.metric("VTEC (TECU)", f"{val:.1f}", f"{z:.1f}σ")
+        st.metric("VTEC", f"{val:.1f}", f"{z:.1f}σ")
 
     with col2:
         if abs(z) > sensitivity:
-            st.error(f"🚨 АНОМАЛИЯ!")
-            st.balloons()  # Эффект привлечения внимания
+            st.warning("⚠️ АНОМАЛИЯ")
+            if st.session_state.audio_activated:
+                play_voice_alert_js(city)
         else:
-            st.success("✅ Стабильно")
+            st.info("✅ Стабильно")
 
     with col3:
         fig, ax = plt.subplots(figsize=(6, 1))
-        ax.plot(st.session_state.history[city], color='red' if abs(z) > sensitivity else 'cyan', linewidth=2)
+        ax.plot(st.session_state.history[city], color='red' if abs(z) > sensitivity else 'cyan')
         ax.axis('off')
         st.pyplot(fig)
 
-if mode == "Реальное время":
-    time.sleep(3)
-    st.rerun()
+time.sleep(5)
+st.rerun()
