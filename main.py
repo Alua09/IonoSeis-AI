@@ -11,13 +11,8 @@ from datetime import datetime, timezone, timedelta
 # --- КОНФИГУРАЦИЯ ---
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Real-Time Expert")
 
-CITIES = {
-    "Алматы": (43.25, 76.92, 5),
-    "Бишкек": (42.87, 74.59, 6),
-    "Токио": (35.68, 139.65, 9)
-}
+CITIES = {"Алматы": (43.25, 76.92, 5), "Бишкек": (42.87, 74.59, 6), "Токио": (35.68, 139.65, 9)}
 
-# Инициализация сессии
 if 'history' not in st.session_state:
     st.session_state.history = {city: [] for city in CITIES}
 if 'audio_activated' not in st.session_state:
@@ -52,23 +47,24 @@ def play_voice_alert_js(city_name):
 
 
 # --- ИНТЕРФЕЙС ---
-st.title("🛰 IonoSeis AI: Экспертный мониторинг (Live Data)")
+st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
 if st.button("🔊 Активировать систему звуковых оповещений"):
     st.session_state.audio_activated = True
 
 sensitivity = st.sidebar.slider("Порог чувствительности (Z-score)", 0.5, 2.0, 1.0, 0.1)
 kp = get_real_kp_index()
-st.info(f"🌐 Реальный Kp-индекс NOAA: **{kp}**")
+st.info(f"🌐 Kp-индекс NOAA: **{kp}**")
 
-# Основной цикл обработки
 for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
 
     local_now = datetime.now(timezone.utc) + timedelta(hours=offset)
     base_norm = get_diurnal_trend(local_now.hour + local_now.minute / 60, lat, local_now)
-    # Расчет текущего значения на базе реальных данных
-    val = base_norm + np.random.normal(0, 0.5 + (kp * 0.1))
+
+    # "Живая" динамика: Kp + локальные магнитные шумы
+    fluctuation = np.random.normal(0, 0.3)
+    val = base_norm + (kp * 0.5) + fluctuation
 
     st.session_state.history[city].append(val)
     if len(st.session_state.history[city]) > 50: st.session_state.history[city].pop(0)
@@ -91,5 +87,5 @@ for city, (lat, lon, offset) in CITIES.items():
         ax.axis('off')
         st.pyplot(fig)
 
-time.sleep(5)
+time.sleep(3)
 st.rerun()
