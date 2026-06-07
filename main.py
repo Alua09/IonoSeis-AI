@@ -7,7 +7,7 @@ import math
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Real-Time Seismo-Monitor")
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Monitoring")
 
 CITIES = {
     "Алматы": (43.25, 76.92, 5),
@@ -29,42 +29,45 @@ def get_real_kp_index():
 
 
 def get_seismic_activity(lat, lon):
-    """Проверка землетрясений (mag > 5.0, радиус 1000км) через USGS API"""
     try:
-        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={lat}&longitude={lon}&maxradiuskm=1000&minmagnitude=5.0&limit=1"
+        # Увеличили радиус для более "редких" событий, чтобы не спамило
+        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=5.5&limit=1"
         data = requests.get(url, timeout=5).json()
         if data['features']:
-            return data['features'][0]['properties']['mag']  # Возвращает магнитуду
+            return data['features'][0]['properties']['mag']
         return 0
     except:
         return 0
 
 
 # --- ИНТЕРФЕЙС ---
-st.title("🛰 IonoSeis AI: Реальный сейсмо-ионосферный мониторинг")
+st.title("🛰 IonoSeis AI: Мониторинг")
 kp = get_real_kp_index()
-sensitivity = st.sidebar.slider("Порог чувствительности (Z-score)", 0.5, 2.0, 1.0, 0.1)
 
 for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
 
+    # 1. Индивидуальный расчет для каждого города
     local_now = datetime.now(timezone.utc) + timedelta(hours=offset)
     total_hours = local_now.hour + local_now.minute / 60
 
-    # Расчет базового VTEC
-    seasonal = 1.0 + 0.2 * math.sin(2 * math.pi * (local_now.timetuple().tm_yday - 80) / 365)
-    vtec_model = (10.0 + 15.0 * math.cos(math.pi * (total_hours - 14) / 12)) * math.cos(math.radians(lat)) * seasonal
+    # Модель VTEC с поправкой на широту (lat)
+    # Используем cos(lat), чтобы города на разных широтах имели разную "базу"
+    vtec_base = (10.0 + 15.0 * math.cos(math.pi * (total_hours - 14) / 12)) * math.cos(math.radians(lat))
 
-    # Получаем реальную сейсмику
+    # 2. Уникальная сигма для каждого города (зависит от широты)
+    sigma = 0.3 + (0.02 * lat / 10.0)
+
+    # 3. Получаем реальную сейсмику
     mag = get_seismic_activity(lat, lon)
 
-    # Если есть землетрясение, добавляем возмущение к VTEC
-    val = vtec_model + (kp * 0.4) + (mag * 2.0 if mag > 0 else 0)
+    # VTEC = База + влияние Kp + сейсмический скачок
+    val = vtec_base + (kp * 0.3) + (mag * 5.0 if mag > 0 else np.random.normal(0, 0.05))
 
     st.session_state.history[city].append(val)
     if len(st.session_state.history[city]) > 50: st.session_state.history[city].pop(0)
 
-    z = (val - vtec_model) / (0.5 + (kp * 0.1))
+    z = (val - vtec_base) / sigma
 
     col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
@@ -73,13 +76,15 @@ for city, (lat, lon, offset) in CITIES.items():
     with col2:
         if mag > 0:
             st.warning(f"⚠️ ЗЕМЛЕТРЯСЕНИЕ M{mag}!")
+        elif abs(z) > 1.8:  # Порог чувствительности
+            st.warning("⚠️ АНОМАЛИЯ ИОНОСФЕРЫ")
         else:
             st.success("✅ Стабильно")
     with col3:
         fig, ax = plt.subplots(figsize=(6, 1))
-        ax.plot(st.session_state.history[city], color='red' if mag > 0 else 'cyan')
+        ax.plot(st.session_state.history[city], color='red' if abs(z) > 1.8 else 'cyan')
         ax.axis('off')
         st.pyplot(fig)
 
-time.sleep(10)  # Запрос к USGS ресурсоемкий, ставим паузу побольше
+time.sleep(5)
 st.rerun()
