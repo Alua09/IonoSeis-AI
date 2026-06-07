@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Dashboard")
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Professional Monitoring")
 
 CITIES = {
     "Алматы": (43.25, 76.92, 5),
@@ -21,7 +21,6 @@ if 'history' not in st.session_state:
 
 # --- НАУЧНЫЕ ФУНКЦИИ ---
 def get_space_weather_data():
-    """Получение Kp и F10.7 из NOAA."""
     try:
         resp_f107 = requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
                                  timeout=5).json()
@@ -33,26 +32,20 @@ def get_space_weather_data():
         return 2.0, 150.0
 
 
-def get_diurnal_trend(hour, lat, date, f107):
-    day_of_year = date.timetuple().tm_yday
-    seasonal = 1.0 + 0.2 * math.sin(2 * math.pi * (day_of_year - 80) / 365)
-    ionization_base = 8.0 + (f107 / 20.0)
-    diurnal = ionization_base + 15.0 * math.cos(math.pi * (hour - 14) / 12)
-    return round(diurnal * (math.cos(math.radians(lat))) * seasonal, 1)
-
-
-def moving_average(data, window=5):
-    if len(data) < window: return data
-    return np.convolve(data, np.ones(window) / window, mode='valid')
+def haversine_distance(lat1, lon1, lat2, lon2):
+    # Расчет расстояния в км между двумя точками
+    R = 6371
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 # --- ИНТЕРФЕЙС ---
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
-
 kp, f107 = get_space_weather_data()
-st.info(f"🌐 Геомагнитный индекс (Kp): **{kp}** | ☀️ Солнечный поток (F10.7): **{f107}**")
+st.info(f"🌐 Kp: **{kp}** | ☀️ Поток F10.7: **{f107}**")
 
-# Запрос к USGS (Сейсмика)
 try:
     quakes = requests.get("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=" +
                           (datetime.now() - timedelta(days=1)).isoformat(), timeout=5).json()
@@ -62,51 +55,48 @@ except:
 for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
     local_now = datetime.now(timezone.utc) + timedelta(hours=offset)
+
+    # Расчет VTEC
     hour = local_now.hour + local_now.minute / 60.0
+    day_of_year = local_now.timetuple().tm_yday
+    seasonal = 1.0 + 0.2 * math.sin(2 * math.pi * (day_of_year - 80) / 365)
+    base_norm = (8.0 + (f107 / 20.0) + 15.0 * math.cos(math.pi * (hour - 14) / 12)) * math.cos(
+        math.radians(lat)) * seasonal
 
-    # 1. Расчеты
-    base_norm = get_diurnal_trend(hour, lat, local_now, f107)
     val = base_norm + np.random.normal(0, 0.5 + (kp * 0.1))
-
     st.session_state.history[city].append(val)
     if len(st.session_state.history[city]) > 50: st.session_state.history[city].pop(0)
 
-    std_dev = 1.5 + (kp * 0.2)
-    z = (val - base_norm) / std_dev
+    z = (val - base_norm) / (1.5 + (kp * 0.2))
 
-    # 2. Поиск сейсмики в радиусе 1000 км
-    found_quakes = [f for f in quakes.get('features', [])
-                    if math.sqrt((f['geometry']['coordinates'][1] - lat) ** 2 +
-                                 (f['geometry']['coordinates'][0] - lon) ** 2) * 111 < 1000]
+    # Поиск землетрясений
+    found = []
+    for f in quakes.get('features', []):
+        dist = haversine_distance(lat, lon, f['geometry']['coordinates'][1], f['geometry']['coordinates'][0])
+        if dist < 1000:
+            found.append((f, dist))
 
-    # 3. Визуализация
     col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
-
     with col1:
         st.subheader(f"📍 {city}")
-        st.caption(f"🕒 Время: {local_now.strftime('%H:%M:%S')}")
-        st.metric("VTEC (TECU)", f"{val:.1f}", f"{z:.1f}σ")
-
+        st.metric("VTEC", f"{val:.1f}", f"{z:.1f}σ")
     with col2:
         st.write("Ионосфера:")
-        if abs(z) > 1.5:
-            st.warning("⚠️ АНОМАЛИЯ")
-        else:
-            st.info("✅ Стабильно")
-
+        st.warning("⚠️ АНОМАЛИЯ") if abs(z) > 1.5 else st.info("✅ Стабильно")
     with col3:
         st.write("Сейсмика:")
-        if found_quakes:
-            st.error(f"⚠️ M{found_quakes[0]['properties']['mag']}")
+        if found:
+            q, dist = found[0]
+            q_time = datetime.fromtimestamp(q['properties']['time'] / 1000, tz=timezone.utc).strftime('%H:%M')
+            st.error(f"⚠️ M{q['properties']['mag']}")
+            st.caption(f"📍 {q['properties']['place']}")
+            st.caption(f"🕒 {q_time} UTC | 📏 {int(dist)} км")
         else:
             st.success("✅ Спокойно")
-
     with col4:
         fig, ax = plt.subplots(figsize=(6, 1.2))
-        smoothed = moving_average(st.session_state.history[city], window=5)
-        ax.plot(smoothed, color='red' if abs(z) > 1.5 else 'cyan', linewidth=2.5)
-        ax.axhline(y=base_norm, color='gray', linestyle='--', alpha=0.5)
-        ax.axis('off')  # ИСПРАВЛЕНО
+        ax.plot(st.session_state.history[city], color='red' if abs(z) > 1.5 else 'cyan', linewidth=2.5)
+        ax.axis('off')
         st.pyplot(fig)
 
 time.sleep(5)
