@@ -19,8 +19,11 @@ CITIES = {
     "Токио": (35.68, 139.65, 9)
 }
 
+# --- ИНИЦИАЛИЗАЦИЯ СОСТОЯНИЯ ---
 if 'history' not in st.session_state:
     st.session_state.history = {city: [] for city in CITIES}
+
+if 'audio_activated' not in st.session_state:
     st.session_state.audio_activated = False
 
 
@@ -41,7 +44,6 @@ def get_diurnal_trend(hour, lat, date):
 
 
 def play_voice_alert_js(city_name):
-    # Генерируем звук
     text = f"Внимание! Наблюдается аномалия в городе {city_name}"
     tts = gTTS(text=text, lang='ru')
     filename = "temp_alert.mp3"
@@ -50,7 +52,7 @@ def play_voice_alert_js(city_name):
     with open(filename, "rb") as f:
         data = base64.b64encode(f.read()).decode()
 
-    # JS для принудительного воспроизведения
+    # JS для принудительного создания аудио-объекта
     js_code = f'''
     <script>
         var audio = new Audio("data:audio/mp3;base64,{data}");
@@ -63,7 +65,7 @@ def play_voice_alert_js(city_name):
 # --- ИНТЕРФЕЙС ---
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
-# Кнопка для "разблокировки" звука
+# Кнопка активации звука
 if st.button("🔊 Активировать систему звуковых оповещений"):
     st.session_state.audio_activated = True
     st.success("Система активирована. Оповещения включены.")
