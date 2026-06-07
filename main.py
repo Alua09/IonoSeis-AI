@@ -83,11 +83,13 @@ with tab1:
         col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
         col1.subheader(f"📍 {city}")
         col1.metric("VTEC", f"{val:.1f}", f"{z:.1f}σ")
+
         col2.write("Ионосфера:")
         if is_anomaly:
             col2.warning("⚠️ АНОМАЛИЯ")
         else:
             col2.info("✅ Стабильно")
+
         col3.write("Сейсмика:")
         col3.success("✅ Спокойно")
 
@@ -105,10 +107,12 @@ with tab1:
 # --- ВКЛАДКА 2: АРХИВ ---
 with tab2:
     st.subheader("Поиск архивных сейсмических данных")
-    city_choice = st.selectbox("Выберите город:", list(CITIES.keys()))
-    target_date = st.date_input("Выберите дату:", datetime.now() - timedelta(days=1))
+    with st.form("archive_form"):
+        city_choice = st.selectbox("Выберите город:", list(CITIES.keys()))
+        target_date = st.date_input("Выберите дату:", datetime.now() - timedelta(days=1))
+        submit_button = st.form_submit_button("Проверить архив")
 
-    if st.button("Проверить архив"):
+    if submit_button:
         lat, lon, _ = CITIES[city_choice]
         start = datetime.combine(target_date, datetime.min.time()).isoformat()
         end = datetime.combine(target_date, datetime.max.time()).isoformat()
@@ -117,19 +121,23 @@ with tab2:
         try:
             res = requests.get(url, timeout=10).json()
             features = res.get('features', [])
-            st.write(f"Ссылка для проверки: [Нажми, чтобы увидеть JSON]({url})")
 
             if features:
+                st.success(f"Найдено событий: {len(features)}")
                 mags = [f['properties']['mag'] for f in features]
                 times = [datetime.fromtimestamp(f['properties']['time'] / 1000).strftime('%H:%M') for f in features]
+
                 for f in features:
                     p = f['properties']
-                    st.error(
-                        f"⚠️ M{p['mag']} | {p['place']} | {datetime.fromtimestamp(p['time'] / 1000).strftime('%H:%M:%S')}")
+                    st.write(
+                        f"⚠️ **M{p['mag']}** | {p['place']} | {datetime.fromtimestamp(p['time'] / 1000).strftime('%H:%M:%S')}")
+
                 fig, ax = plt.subplots(figsize=(10, 3))
-                ax.bar(times, mags, color='orange', alpha=0.7)
+                ax.bar(times, mags, color='orange')
+                ax.set_title(f"Сейсмичность в радиусе 2000 км от {city_choice}")
                 st.pyplot(fig)
             else:
-                st.success(f"Нет событий в радиусе 2000 км от {city_choice} за {target_date}")
+                st.warning(f"Данных за {target_date} нет. Попробуйте другую дату.")
+                st.write(f"Ссылка для ручной проверки: {url}")
         except Exception as e:
-            st.error(f"Ошибка соединения: {e}")
+            st.error(f"Ошибка запроса: {e}")
