@@ -33,7 +33,6 @@ def get_space_weather_data():
 
 
 def haversine_distance(lat1, lon1, lat2, lon2):
-    # Расчет расстояния в км между двумя точками
     R = 6371
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
@@ -69,11 +68,11 @@ for city, (lat, lon, offset) in CITIES.items():
 
     z = (val - base_norm) / (1.5 + (kp * 0.2))
 
-    # Поиск землетрясений
+    # Поиск сейсмики (радиус 500 км для региональной значимости)
     found = []
     for f in quakes.get('features', []):
         dist = haversine_distance(lat, lon, f['geometry']['coordinates'][1], f['geometry']['coordinates'][0])
-        if dist < 1000:
+        if dist < 500:
             found.append((f, dist))
 
     col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
@@ -82,7 +81,10 @@ for city, (lat, lon, offset) in CITIES.items():
         st.metric("VTEC", f"{val:.1f}", f"{z:.1f}σ")
     with col2:
         st.write("Ионосфера:")
-        st.warning("⚠️ АНОМАЛИЯ") if abs(z) > 1.5 else st.info("✅ Стабильно")
+        if abs(z) > 1.5:
+            st.warning("⚠️ АНОМАЛИЯ")
+        else:
+            st.info("✅ Стабильно")
     with col3:
         st.write("Сейсмика:")
         if found:
