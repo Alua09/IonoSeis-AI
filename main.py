@@ -83,13 +83,11 @@ with tab1:
         col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
         col1.subheader(f"📍 {city}")
         col1.metric("VTEC", f"{val:.1f}", f"{z:.1f}σ")
-
         col2.write("Ионосфера:")
         if is_anomaly:
             col2.warning("⚠️ АНОМАЛИЯ")
         else:
             col2.info("✅ Стабильно")
-
         col3.write("Сейсмика:")
         col3.success("✅ Спокойно")
 
@@ -114,12 +112,13 @@ with tab2:
         lat, lon, _ = CITIES[city_choice]
         start = datetime.combine(target_date, datetime.min.time()).isoformat()
         end = datetime.combine(target_date, datetime.max.time()).isoformat()
-        # Добавлен minmagnitude=0, чтобы видеть даже слабые события
-        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={start}&endtime={end}&latitude={lat}&longitude={lon}&maxradiuskm=1000&minmagnitude=0"
+        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={start}&endtime={end}&latitude={lat}&longitude={lon}&maxradiuskm=2000&minmagnitude=0"
 
         try:
-            res = requests.get(url, timeout=5).json()
+            res = requests.get(url, timeout=10).json()
             features = res.get('features', [])
+            st.write(f"Ссылка для проверки: [Нажми, чтобы увидеть JSON]({url})")
+
             if features:
                 mags = [f['properties']['mag'] for f in features]
                 times = [datetime.fromtimestamp(f['properties']['time'] / 1000).strftime('%H:%M') for f in features]
@@ -129,9 +128,8 @@ with tab2:
                         f"⚠️ M{p['mag']} | {p['place']} | {datetime.fromtimestamp(p['time'] / 1000).strftime('%H:%M:%S')}")
                 fig, ax = plt.subplots(figsize=(10, 3))
                 ax.bar(times, mags, color='orange', alpha=0.7)
-                ax.set_title(f"Сейсмичность в радиусе 1000 км от {city_choice} за {target_date}")
                 st.pyplot(fig)
             else:
-                st.success(f"В этот день событий в радиусе 1000 км от {city_choice} нет.")
+                st.success(f"Нет событий в радиусе 2000 км от {city_choice} за {target_date}")
         except Exception as e:
-            st.error(f"Ошибка получения данных: {e}")
+            st.error(f"Ошибка соединения: {e}")
