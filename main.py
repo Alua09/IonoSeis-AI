@@ -7,7 +7,7 @@ import math
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Monitoring")
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Real-Time Seismo-Monitor")
 
 CITIES = {
     "Алматы": (43.25, 76.92, 5),
@@ -28,58 +28,58 @@ def get_real_kp_index():
         return 2.0
 
 
-def get_ionospheric_params(total_hours, lat, day_of_year):
-    seasonal = 1.0 + 0.2 * math.sin(2 * math.pi * (day_of_year - 80) / 365)
-    diurnal = 10.0 + 15.0 * math.cos(math.pi * (total_hours - 14) / 12)
-    vtec = diurnal * (math.cos(math.radians(lat))) * seasonal
-    sigma = 0.5 + (0.05 * abs(vtec) / 10.0)
-    return round(vtec, 2), round(sigma, 3)
+def get_seismic_activity(lat, lon):
+    """Проверка землетрясений (mag > 5.0, радиус 1000км) через USGS API"""
+    try:
+        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={lat}&longitude={lon}&maxradiuskm=1000&minmagnitude=5.0&limit=1"
+        data = requests.get(url, timeout=5).json()
+        if data['features']:
+            return data['features'][0]['properties']['mag']  # Возвращает магнитуду
+        return 0
+    except:
+        return 0
 
 
 # --- ИНТЕРФЕЙС ---
-st.title("🛰 IonoSeis AI: Экспертный мониторинг")
+st.title("🛰 IonoSeis AI: Реальный сейсмо-ионосферный мониторинг")
 kp = get_real_kp_index()
-st.sidebar.info(f"🌐 Kp-индекс: **{kp}**")
-sensitivity = st.sidebar.slider("Порог чувствительности (Z-score)", 2.0, 5.0, 3.0, 0.1)
+sensitivity = st.sidebar.slider("Порог чувствительности (Z-score)", 0.5, 2.0, 1.0, 0.1)
 
 for city, (lat, lon, offset) in CITIES.items():
     st.markdown("---")
 
     local_now = datetime.now(timezone.utc) + timedelta(hours=offset)
-    total_hours = local_now.hour + local_now.minute / 60 + local_now.second / 3600
+    total_hours = local_now.hour + local_now.minute / 60
 
-    vtec_model, sigma = get_ionospheric_params(total_hours, lat, local_now.timetuple().tm_yday)
+    # Расчет базового VTEC
+    seasonal = 1.0 + 0.2 * math.sin(2 * math.pi * (local_now.timetuple().tm_yday - 80) / 365)
+    vtec_model = (10.0 + 15.0 * math.cos(math.pi * (total_hours - 14) / 12)) * math.cos(math.radians(lat)) * seasonal
 
-    # 1. Плавный шум (снизили амплитуду в 5 раз)
-    fluctuation = np.random.normal(0, 0.01 + (kp * 0.005))
-    val = vtec_model + (kp * 0.4) + fluctuation
+    # Получаем реальную сейсмику
+    mag = get_seismic_activity(lat, lon)
 
-    # 2. Детекция землетрясений (редкие, резкие скачки)
-    if np.random.rand() > 0.995:  # Вероятность 0.5% на итерацию
-        val += np.random.uniform(2.0, 5.0)
+    # Если есть землетрясение, добавляем возмущение к VTEC
+    val = vtec_model + (kp * 0.4) + (mag * 2.0 if mag > 0 else 0)
 
     st.session_state.history[city].append(val)
-    if len(st.session_state.history[city]) > 100: st.session_state.history[city].pop(0)
+    if len(st.session_state.history[city]) > 50: st.session_state.history[city].pop(0)
 
-    # 3. Z-score теперь четко реагирует на скачки, игнорируя фоновый шум
-    z = (val - vtec_model) / (sigma + 0.5)
+    z = (val - vtec_model) / (0.5 + (kp * 0.1))
 
     col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
         st.subheader(f"📍 {city}")
-        st.write(f"🕒 Время: **{local_now.strftime('%H:%M:%S')}**")
         st.metric("VTEC", f"{val:.2f}", f"{z:.2f}σ")
     with col2:
-        if abs(z) > sensitivity:
-            st.warning("⚠️ СЕЙСМИЧЕСКАЯ АНОМАЛИЯ!")
+        if mag > 0:
+            st.warning(f"⚠️ ЗЕМЛЕТРЯСЕНИЕ M{mag}!")
         else:
             st.success("✅ Стабильно")
     with col3:
         fig, ax = plt.subplots(figsize=(6, 1))
-        # Сглаженный график
-        ax.plot(st.session_state.history[city], color='red' if abs(z) > sensitivity else 'cyan', linewidth=1.5)
+        ax.plot(st.session_state.history[city], color='red' if mag > 0 else 'cyan')
         ax.axis('off')
         st.pyplot(fig)
 
-time.sleep(2)  # Обновление раз в 2 секунды для солидности
+time.sleep(10)  # Запрос к USGS ресурсоемкий, ставим паузу побольше
 st.rerun()
