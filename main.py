@@ -16,16 +16,12 @@ CITIES = {
     "Токио": (35.68, 139.65, 9)
 }
 
-# Инициализация состояний для предотвращения ошибок
-if 'history' not in st.session_state:
-    st.session_state.history = {city: [] for city in CITIES}
-if 'last_alert' not in st.session_state:
-    st.session_state.last_alert = {city: False for city in CITIES}
-if 'archive_results' not in st.session_state:
-    st.session_state.archive_results = None
+if 'history' not in st.session_state: st.session_state.history = {city: [] for city in CITIES}
+if 'last_alert' not in st.session_state: st.session_state.last_alert = {city: False for city in CITIES}
+if 'archive_results' not in st.session_state: st.session_state.archive_results = None
 
 
-# --- НАУЧНЫЕ ФУНКЦИИ ---
+# --- ФУНКЦИИ ---
 def get_space_weather_data():
     try:
         f107 = float(requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
@@ -46,46 +42,46 @@ def get_diurnal_trend(hour, lat, f107):
 
 # --- ИНТЕРФЕЙС ---
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
-
-# Шапка с геомагнитными данными
 kp, f107 = get_space_weather_data()
 st.info(f"🌐 Kp: **{kp}** | ☀️ F10.7: **{f107}**")
 
 tab1, tab2 = st.tabs(["🟢 Мониторинг (Live)", "📂 Архив землетрясений"])
 
 with tab1:
+    # Запрос актуальных землетрясений (за последние 24 часа)
+    try:
+        url_live = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=" + (
+                    datetime.now() - timedelta(days=1)).isoformat()
+        quakes_data = requests.get(url_live, timeout=5).json().get('features', [])
+    except:
+        quakes_data = []
+
     for city, (lat, lon, offset) in CITIES.items():
         st.markdown("---")
         local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
         hour = local_time.hour + local_time.minute / 60.0
 
-        # Расчет данных
-        base_norm = get_diurnal_trend(hour, lat, f107)
-        val = base_norm + np.random.normal(0, 0.8 + (kp * 0.1))
+        # Сейсмика: фильтруем события в радиусе ~1000 км (около 10 градусов)
+        nearby_quakes = [q for q in quakes_data if math.sqrt(
+            (q['geometry']['coordinates'][1] - lat) ** 2 + (q['geometry']['coordinates'][0] - lon) ** 2) < 10]
 
+        val = get_diurnal_trend(hour, lat, f107) + np.random.normal(0, 0.8 + (kp * 0.1))
         st.session_state.history[city].append(val)
         if len(st.session_state.history[city]) > 50: st.session_state.history[city].pop(0)
 
-        # Статистика сигм
-        z = (val - base_norm) / (1.5 + (kp * 0.2))
+        z = (val - get_diurnal_trend(hour, lat, f107)) / (1.5 + (kp * 0.2))
         is_anomaly = abs(z) > 1.5
 
-        # Оповещения
-        if is_anomaly and not st.session_state.last_alert[city]:
-            st.toast(f"⚠️ Аномалия в {city}!", icon="🚨")
-            components.html(
-                """<audio autoplay="true"><source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg"></audio>""",
-                height=0)
-            st.session_state.last_alert[city] = True
-        elif not is_anomaly:
-            st.session_state.last_alert[city] = False
-
-        # Отображение
         col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
         col1.subheader(f"📍 {city}")
         col1.caption(f"🕒 {local_time.strftime('%H:%M:%S')}")
         col2.metric("VTEC", f"{val:.1f}", f"{z:+.1f}σ")
-        col3.write("Статус: " + ("⚠️ АНОМАЛИЯ" if is_anomaly else "✅ Стабильно"))
+
+        # Индикация сейсмики
+        if nearby_quakes:
+            col3.error(f"⚠️ M{nearby_quakes[0]['properties']['mag']}")
+        else:
+            col3.success("✅ Спокойно")
 
         fig, ax = plt.subplots(figsize=(6, 1))
         ax.plot(st.session_state.history[city], color='red' if is_anomaly else 'cyan', lw=2)
@@ -96,12 +92,11 @@ with tab1:
     st.rerun()
 
 with tab2:
-    st.subheader("Поиск архивных данных (USGS)")
-    # Кнопка поиска
+    st.subheader("Поиск архивных данных")
     with st.form(key='archive_form'):
         city_sel = st.selectbox("Выберите город:", list(CITIES.keys()))
         date_sel = st.date_input("Дата начала:", datetime.now() - timedelta(days=7))
-        submitted = st.form_submit_button("Найти события")
+        submitted = st.form_submit_button("Найти")
 
     if submitted:
         lat, lon = CITIES[city_sel][0], CITIES[city_sel][1]
@@ -110,14 +105,10 @@ with tab2:
             res = requests.get(url, timeout=10).json()
             st.session_state.archive_results = res.get('features', [])
         except:
-            st.error("Ошибка при запросе к USGS.")
+            st.error("Ошибка сети.")
 
-    # Вывод результатов (всегда держим в стейте)
     if st.session_state.archive_results is not None:
-        if st.session_state.archive_results:
-            for f in st.session_state.archive_results[:10]:
-                p = f['properties']
-                dt = datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d %H:%M')
-                st.error(f"⚠️ {dt} | **{p['mag']} M** | {p['place']}")
-        else:
-            st.success("В выбранном диапазоне крупных сейсмических событий не найдено.")
+        for f in st.session_state.archive_results[:10]:
+            p = f['properties']
+            st.write(
+                f"⚠️ {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d')} | **{p['mag']} M** | {p['place']}")
