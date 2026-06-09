@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import requests
 import math
 import time
-import streamlit.components.v1 as components
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
@@ -16,9 +15,10 @@ CITIES = {
     "Токио": (35.68, 139.65, 9)
 }
 
-if 'history' not in st.session_state: st.session_state.history = {city: [] for city in CITIES}
-if 'last_alert' not in st.session_state: st.session_state.last_alert = {city: False for city in CITIES}
-if 'archive_results' not in st.session_state: st.session_state.archive_results = None
+if 'history' not in st.session_state:
+    st.session_state.history = {city: [] for city in CITIES}
+if 'archive_results' not in st.session_state:
+    st.session_state.archive_results = None
 
 
 # --- ФУНКЦИИ ---
@@ -48,11 +48,11 @@ st.info(f"🌐 Kp: **{kp}** | ☀️ F10.7: **{f107}**")
 tab1, tab2 = st.tabs(["🟢 Мониторинг (Live)", "📂 Архив землетрясений"])
 
 with tab1:
-    # Запрос актуальных землетрясений (за последние 24 часа)
+    # Запрос сейсмики
     try:
-        url_live = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=" + (
+        url_quakes = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=" + (
                     datetime.now() - timedelta(days=1)).isoformat()
-        quakes_data = requests.get(url_live, timeout=5).json().get('features', [])
+        quakes_data = requests.get(url_quakes, timeout=5).json().get('features', [])
     except:
         quakes_data = []
 
@@ -61,27 +61,37 @@ with tab1:
         local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
         hour = local_time.hour + local_time.minute / 60.0
 
-        # Сейсмика: фильтруем события в радиусе ~1000 км (около 10 градусов)
-        nearby_quakes = [q for q in quakes_data if math.sqrt(
+        # Сейсмика: ищем ближайшее событие (радиус ~1000 км)
+        nearby = [q for q in quakes_data if math.sqrt(
             (q['geometry']['coordinates'][1] - lat) ** 2 + (q['geometry']['coordinates'][0] - lon) ** 2) < 10]
 
-        val = get_diurnal_trend(hour, lat, f107) + np.random.normal(0, 0.8 + (kp * 0.1))
+        # Ионосфера
+        base_norm = get_diurnal_trend(hour, lat, f107)
+        val = base_norm + np.random.normal(0, 0.8 + (kp * 0.1))
         st.session_state.history[city].append(val)
         if len(st.session_state.history[city]) > 50: st.session_state.history[city].pop(0)
 
-        z = (val - get_diurnal_trend(hour, lat, f107)) / (1.5 + (kp * 0.2))
+        z = (val - base_norm) / (1.5 + (kp * 0.2))
         is_anomaly = abs(z) > 1.5
 
-        col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
+        # Рендер
+        col1, col2, col3, col4 = st.columns([1, 1, 1.5, 2])
         col1.subheader(f"📍 {city}")
         col1.caption(f"🕒 {local_time.strftime('%H:%M:%S')}")
         col2.metric("VTEC", f"{val:.1f}", f"{z:+.1f}σ")
 
-        # Индикация сейсмики
-        if nearby_quakes:
-            col3.error(f"⚠️ M{nearby_quakes[0]['properties']['mag']}")
+        # Статус ионосферы
+        if is_anomaly:
+            col3.error(f"⚠️ АНОМАЛИЯ (Z={z:.1f})")
         else:
-            col3.success("✅ Спокойно")
+            col3.success(f"✅ Стабильно (Z={z:.1f})")
+
+        # Детальная сейсмика
+        if nearby:
+            q = nearby[0]['properties']
+            col3.write(f"⚡ **{q['mag']}M** | {q['place'].split(',')[-1]}")
+        else:
+            col3.write("✅ Сейсмика: Спокойно")
 
         fig, ax = plt.subplots(figsize=(6, 1))
         ax.plot(st.session_state.history[city], color='red' if is_anomaly else 'cyan', lw=2)
@@ -92,10 +102,10 @@ with tab1:
     st.rerun()
 
 with tab2:
-    st.subheader("Поиск архивных данных")
+    st.subheader("Поиск архивных данных (USGS)")
     with st.form(key='archive_form'):
         city_sel = st.selectbox("Выберите город:", list(CITIES.keys()))
-        date_sel = st.date_input("Дата начала:", datetime.now() - timedelta(days=7))
+        date_sel = st.date_input("Дата:", datetime.now() - timedelta(days=7))
         submitted = st.form_submit_button("Найти")
 
     if submitted:
@@ -110,5 +120,5 @@ with tab2:
     if st.session_state.archive_results is not None:
         for f in st.session_state.archive_results[:10]:
             p = f['properties']
-            st.write(
-                f"⚠️ {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d')} | **{p['mag']} M** | {p['place']}")
+            dt = datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d %H:%M')
+            st.error(f"⚠️ {dt} | **{p['mag']} M** | {p['place']}")
