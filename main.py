@@ -19,7 +19,20 @@ if 'history' not in st.session_state: st.session_state.history = {city: [] for c
 if 'archive_results' not in st.session_state: st.session_state.archive_results = None
 
 
-# --- ФУНКЦИИ ---
+# --- НАУЧНЫЕ ФУНКЦИИ ---
+def get_space_weather_data():
+    try:
+        # Получаем реальные данные NOAA
+        f107 = float(requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
+                                  timeout=3).json()[-1][1])
+        kp = float(
+            requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=3).json()[-1][
+                1])
+        return kp, f107
+    except:
+        return 2.0, 150.0
+
+
 def get_diurnal_trend(hour, lat, f107):
     base = 8.0 + (f107 / 20.0)
     diurnal = base + 15.0 * np.cos(np.pi * (hour - 14) / 12)
@@ -28,10 +41,16 @@ def get_diurnal_trend(hour, lat, f107):
 
 # --- ИНТЕРФЕЙС ---
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
+kp, f107 = get_space_weather_data()
+st.info(f"🌐 Kp: **{kp}** | ☀️ F10.7: **{f107}** | 📡 Радиус поиска: 500 км")
 
 tab1, tab2, tab3 = st.tabs(["🟢 Live-мониторинг", "📂 Сейсмо-архив", "📊 Анализ нормы VTEC"])
 
 with tab1:
+    # Контейнер для обновления
+    live_placeholder = st.empty()
+
+    # Получаем данные USGS
     try:
         url_quakes = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=" + (
                     datetime.now() - timedelta(days=1)).isoformat()
@@ -39,48 +58,47 @@ with tab1:
     except:
         quakes_data = []
 
-    for city, (lat, lon, offset) in CITIES.items():
-        st.markdown("---")
-        local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
-        hour = local_time.hour + local_time.minute / 60.0
+    with live_placeholder.container():
+        for city, (lat, lon, offset) in CITIES.items():
+            st.markdown("---")
+            local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
+            hour = local_time.hour + local_time.minute / 60.0
 
-        nearby = [q for q in quakes_data if math.sqrt(
-            (q['geometry']['coordinates'][1] - lat) ** 2 + (q['geometry']['coordinates'][0] - lon) ** 2) < 4.5]
+            nearby = [q for q in quakes_data if math.sqrt(
+                (q['geometry']['coordinates'][1] - lat) ** 2 + (q['geometry']['coordinates'][0] - lon) ** 2) < 4.5]
 
-        base_norm = get_diurnal_trend(hour, lat, 150.0)
-        val = base_norm + np.random.normal(0, 0.5)
+            base_norm = get_diurnal_trend(hour, lat, f107)
+            # Если Kp > 4, добавляем "солнечное возмущение" к значению VTEC
+            noise = np.random.normal(0, 0.5 + (kp * 0.2))
+            val = base_norm + noise
 
-        st.session_state.history[city].append(val)
-        if len(st.session_state.history[city]) > 60: st.session_state.history[city].pop(0)
+            st.session_state.history[city].append(val)
+            if len(st.session_state.history[city]) > 60: st.session_state.history[city].pop(0)
 
-        # Расчет сигмы для аномалии
-        z = (val - base_norm) / 1.5
-        is_anomaly = abs(z) > 1.8
+            z = (val - base_norm) / (1.5 + (kp * 0.3))
 
-        col1, col2, col3, col4 = st.columns([1, 1, 1.5, 2])
-        col1.subheader(f"📍 {city}")
-        col1.write(f"🕒 {local_time.strftime('%H:%M:%S')}")
-        col1.metric("VTEC", f"{val:.1f}", f"{z:+.1f}σ")
+            col1, col2, col3, col4 = st.columns([1, 1, 1.5, 2])
+            col1.subheader(f"📍 {city}")
+            col1.write(f"🕒 {local_time.strftime('%H:%M:%S')}")
+            col1.metric("VTEC", f"{val:.1f}", f"{z:+.1f}σ")
 
-        # СТАТУС АНОМАЛИИ
-        if is_anomaly:
-            col2.error(f"⚠️ АНОМАЛИЯ (Z={z:.1f})")
-        else:
-            col2.success("✅ Стабильно")
+            # Логика аномалии с учетом Kp
+            if abs(z) > 1.8 and kp < 4.0:
+                col2.error(f"⚠️ АНОМАЛИЯ (Z={z:.1f})")
+            elif kp >= 4.0:
+                col2.warning(f"☀️ Солн. возмущение (Kp={kp})")
+            else:
+                col2.success("✅ Стабильно")
 
-        if nearby:
-            col3.error(f"🚨 {nearby[0]['properties']['mag']}M | {nearby[0]['properties']['place'].split(',')[-1]}")
-        else:
-            col3.success("✅ Сейсмика: Спокойно")
+            if nearby:
+                col3.error(f"🚨 {nearby[0]['properties']['mag']}M | {nearby[0]['properties']['place'].split(',')[-1]}")
+            else:
+                col3.success("✅ Сейсмика: Спокойно")
 
-        fig, ax = plt.subplots(figsize=(6, 1))
-        ax.plot(st.session_state.history[city], color='red' if is_anomaly else 'cyan', lw=2)
-        ax.axis('off')
-        col4.pyplot(fig)
-
-    # Авто-обновление (раз в 10 секунд)
-    time.sleep(10)
-    st.rerun()
+            fig, ax = plt.subplots(figsize=(6, 1))
+            ax.plot(st.session_state.history[city], color='cyan', lw=2)
+            ax.axis('off')
+            col4.pyplot(fig)
 
 with tab2:
     st.subheader("📂 Сейсмо-архив")
@@ -100,12 +118,10 @@ with tab2:
             p = f['properties']
             st.write(
                 f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d')} | **{p['mag']} M** | {p['place']}")
-    else:
-        st.info("Нажмите кнопку для загрузки архива.")
 
 with tab3:
     st.subheader("📊 Анализ нормы VTEC")
     c = st.selectbox("Город для анализа:", list(CITIES.keys()))
     h = st.slider("Час суток (UTC):", 0, 23, 12)
-    norm = get_diurnal_trend(h, CITIES[c][0], 150.0)
+    norm = get_diurnal_trend(h, CITIES[c][0], f107)
     st.info(f"Ожидаемый VTEC для {c} в {h}:00 составляет **{norm} TECU**.")
