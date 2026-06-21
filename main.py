@@ -3,8 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import requests
 import math
+import time
 from datetime import datetime, timezone, timedelta
-
 # --- КОНФИГУРАЦИЯ ---
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Dashboard")
 
