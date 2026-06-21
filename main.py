@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import requests
 import math
+import time
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
@@ -18,7 +19,7 @@ if 'history' not in st.session_state: st.session_state.history = {city: [] for c
 if 'archive_results' not in st.session_state: st.session_state.archive_results = None
 
 
-# --- НАУЧНЫЕ ФУНКЦИИ ---
+# --- ФУНКЦИИ ---
 def get_space_weather_data():
     try:
         f107 = float(requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
@@ -40,13 +41,12 @@ def get_diurnal_trend(hour, lat, f107):
 # --- ИНТЕРФЕЙС ---
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
-# Блок для жюри
 with st.expander("ℹ️ Методология мониторинга"):
     st.write(
-        "Система сопоставляет VTEC (электронную плотность) с суточной моделью. При отклонении Z > 1.8 фиксируется аномалия, если геомагнитный Kp-индекс < 4.0.")
+        "Система отслеживает VTEC в сравнении с суточной нормой. При отклонении Z > 1.8 фиксируется аномалия, если геомагнитный Kp-индекс < 4.0.")
 
 kp, f107 = get_space_weather_data()
-st.info(f"🌐 Kp: **{kp}** | ☀️ F10.7: **{f107}** | 📡 Радиус: 500 км")
+st.info(f"🌐 Kp: **{kp}** | ☀️ F10.7: **{f107}** | 📡 Радиус поиска: 500 км")
 
 tab1, tab2, tab3 = st.tabs(["🟢 Live-мониторинг", "📂 Сейсмо-архив", "📊 Анализ нормы VTEC"])
 
@@ -65,18 +65,22 @@ with tab1:
         nearby = [q for q in quakes_data if math.sqrt(
             (q['geometry']['coordinates'][1] - lat) ** 2 + (q['geometry']['coordinates'][0] - lon) ** 2) < 4.5]
 
-        val = get_diurnal_trend(hour, lat, f107) + np.random.normal(0, 0.5 + (kp * 0.1))
-        z = (val - get_diurnal_trend(hour, lat, f107)) / 1.5
+        norm = get_diurnal_trend(hour, lat, f107)
+        val = norm + np.random.normal(0, 0.5 + (kp * 0.1))
+        z = (val - norm) / 1.5
+
+        st.session_state.history[city].append(val)
+        if len(st.session_state.history[city]) > 30: st.session_state.history[city].pop(0)
 
         col1, col2, col3, col4 = st.columns([1, 1, 1.5, 2])
         col1.subheader(f"📍 {city}")
         col1.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ")
 
-        # ДЕТАЛИЗАЦИЯ СТАТУСА
+        # Информативный статус
         if kp >= 4:
-            col2.warning("☀️ Солн. активность: Kp повышен")
+            col2.warning("☀️ Активность: Kp-индекс повышен")
         elif abs(z) > 1.8:
-            col2.error(f"⚠️ Аномалия VTEC: Z={z:.1f}")
+            col2.error(f"⚠️ Аномалия: Z-score {z:.1f}")
         else:
             col2.success("✅ VTEC в норме: Ионосфера спокойна")
 
@@ -86,7 +90,7 @@ with tab1:
             col3.success("✅ Сейсмика: Активности нет")
 
         fig, ax = plt.subplots(figsize=(6, 1))
-        ax.plot(st.session_state.history.get(city, []), color='cyan')
+        ax.plot(st.session_state.history[city], color='cyan')
         ax.axis('off')
         col4.pyplot(fig)
 
@@ -111,7 +115,7 @@ with tab2:
 
 with tab3:
     st.subheader("📊 Анализ нормы VTEC")
-    c = st.selectbox("Город:", list(CITIES.keys()))
+    c = st.selectbox("Город для анализа:", list(CITIES.keys()))
     h = st.slider("Час суток (UTC):", 0, 23, 12)
     norm = get_diurnal_trend(h, CITIES[c][0], f107)
-    st.info(f"Ожидаемый уровень VTEC для {c} в {h}:00 составляет **{norm} TECU**.")
+    st.info(f"Ожидаемый VTEC для {c} в {h}:00 составляет **{norm} TECU**.")
