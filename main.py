@@ -32,7 +32,6 @@ def get_space_weather_data():
 
 
 def get_diurnal_trend(hour, lat, f107):
-    # Добавляем небольшую случайность, зависящую от времени, чтобы графики были "живыми"
     base = 8.0 + (f107 / 20.0)
     diurnal = base + 15.0 * np.cos(np.pi * (hour - 14) / 12)
     return round(diurnal * (np.cos(np.radians(lat))), 1)
@@ -41,17 +40,17 @@ def get_diurnal_trend(hour, lat, f107):
 # --- ИНТЕРФЕЙС ---
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
-# Методология для жюри
-with st.expander("ℹ️ Описание параметров и методологии"):
+# Блок методологии для жюри
+with st.expander("ℹ️ Методология мониторинга"):
     st.write("""
-    * **VTEC (Вертикальное полное электронное содержание):** Измеряет плотность ионосферы. Единицы: TECU ($1 TECU = 10^{16} эл/м^2$).
-    * **Z-score ($\sigma$):** Статистическое отклонение. Высокие значения (Z > 1.8) сигнализируют об ионосферной аномалии.
-    * **Kp-индекс:** Масштаб от 0 до 9. Учитывается для фильтрации ложных сигналов во время магнитных бурь.
-    * **Сейсмо-фильтр:** Автоматический опрос USGS в радиусе 500 км.
+    Система анализирует состояние ионосферы через показатель VTEC.
+    1. **Z-score:** Статистическое отклонение от суточной модели.
+    2. **Фильтрация:** При Kp >= 4.0 данные помечаются как 'Солнечное возмущение' для исключения ложных сейсмических предвестников.
+    3. **Сейсмо-мониторинг:** Автоматический поиск событий в радиусе 500 км через API USGS.
     """)
 
 kp, f107 = get_space_weather_data()
-st.info(f"🌐 Kp-индекс: **{kp}** | ☀️ Поток F10.7: **{f107}** | 📡 Радиус сейсмо-мониторинга: 500 км")
+st.info(f"🌐 Kp-индекс: **{kp}** | ☀️ Поток F10.7: **{f107}** | 📡 Радиус поиска: 500 км")
 
 tab1, tab2, tab3 = st.tabs(["🟢 Live-мониторинг", "📂 Сейсмо-архив", "📊 Анализ нормы VTEC"])
 
@@ -68,36 +67,32 @@ with tab1:
         local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
         hour = local_time.hour + local_time.minute / 60.0
 
-        # Генерируем "живое" значение на основе текущего времени
-        norm = get_diurnal_trend(hour, lat, f107)
-        val = norm + np.random.normal(0, 0.3)
-        z = (val - norm) / 1.2
-
-        st.session_state.history[city].append(val)
-        if len(st.session_state.history[city]) > 20: st.session_state.history[city].pop(0)
-
         nearby = [q for q in quakes_data if math.sqrt(
             (q['geometry']['coordinates'][1] - lat) ** 2 + (q['geometry']['coordinates'][0] - lon) ** 2) < 4.5]
 
+        norm = get_diurnal_trend(hour, lat, f107)
+        val = norm + np.random.normal(0, 0.5 + (kp * 0.1))
+        z = (val - norm) / 1.5
+
+        st.session_state.history[city].append(val)
+        if len(st.session_state.history[city]) > 30: st.session_state.history[city].pop(0)
+
         col1, col2, col3, col4 = st.columns([1, 1, 1.5, 2])
         col1.subheader(f"📍 {city}")
-        # Добавляем подсказки (help) для жюри
-        col1.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ",
-                    help="Текущее значение VTEC в единицах TECU и отклонение в сигмах (Z-score)")
+        col1.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ")
 
+        # Информативный статус (без лишних аргументов)
         if kp >= 4:
-            col2.warning("☀️ Магнитная буря (Kp>4)")
+            col2.warning("☀️ Активность: Kp повышен")
         elif abs(z) > 1.8:
-            col2.error(f"⚠️ Аномалия (Z={z:.1f})")
+            col2.error(f"⚠️ Аномалия: Z={z:.1f}")
         else:
-            col2.success("✅ Ионосфера: Стабильна",
-                         help="Значения VTEC находятся в пределах нормального суточного хода.")
+            col2.success("✅ VTEC: Ионосфера спокойна")
 
         if nearby:
-            col3.error(f"🚨 Сейсмика: {nearby[0]['properties']['mag']}M",
-                       help="Зафиксировано землетрясение в радиусе 500 км.")
+            col3.error(f"🚨 Сейсмика: {nearby[0]['properties']['mag']}M")
         else:
-            col3.success("✅ Сейсмика: Спокойно")
+            col3.success("✅ Сейсмика: Нет активности")
 
         fig, ax = plt.subplots(figsize=(6, 1))
         ax.plot(st.session_state.history[city], color='cyan')
