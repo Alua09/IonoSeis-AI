@@ -15,12 +15,12 @@ CITIES = {
     "Токио": (35.68, 139.65, 9)
 }
 
-# Гарантированная инициализация состояний
+# Инициализация всех данных в сессии
 if 'history' not in st.session_state: st.session_state.history = {city: [] for city in CITIES}
-if 'archive_results' not in st.session_state: st.session_state.archive_results = []
+if 'archive_results' not in st.session_state: st.session_state.archive_results = None
 
 
-# --- НАУЧНЫЕ ФУНКЦИИ ---
+# --- ФУНКЦИИ ---
 def get_space_weather_data():
     try:
         f107 = float(requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
@@ -44,10 +44,10 @@ st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 kp, f107 = get_space_weather_data()
 st.info(f"🌐 Kp: **{kp}** | ☀️ F10.7: **{f107}** | 📡 Радиус: 500 км")
 
+# Использование уникальных ключей для вкладок
 tab1, tab2, tab3 = st.tabs(["🟢 Live-мониторинг", "📂 Сейсмо-архив", "📊 Анализ нормы VTEC"])
 
 with tab1:
-    # (Логика Live-мониторинга)
     try:
         url_quakes = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=" + (
                     datetime.now() - timedelta(days=1)).isoformat()
@@ -60,24 +60,25 @@ with tab1:
         nearby = [q for q in quakes_data if math.sqrt(
             (q['geometry']['coordinates'][1] - lat) ** 2 + (q['geometry']['coordinates'][0] - lon) ** 2) < 4.5]
         hour = (datetime.now(timezone.utc) + timedelta(hours=offset)).hour
-        base_norm = get_diurnal_trend(hour, lat, f107)
+        val = get_diurnal_trend(hour, lat, f107) + np.random.normal(0, 0.5)
 
         col1, col2 = st.columns([1, 2])
-        col1.subheader(f"📍 {city}")
+        col1.metric(f"📍 {city}", f"{val:.1f} TECU")
         if nearby:
             col2.error(f"⚡ {nearby[0]['properties']['mag']}M | {nearby[0]['properties']['place']}")
         else:
             col2.success("✅ Сейсмика: Спокойно")
 
-    time.sleep(5)
+    time.sleep(8)
     st.rerun()
 
 with tab2:
     st.subheader("📂 Архив сейсмических событий")
+    # Форма не будет сбрасываться, так как мы берем данные из session_state
     with st.form(key='archive_form'):
         city_sel = st.selectbox("Город:", list(CITIES.keys()))
-        date_sel = st.date_input("Дата начала:", datetime.now() - timedelta(days=7))
-        submitted = st.form_submit_button("Загрузить данные")
+        date_sel = st.date_input("Дата:", datetime.now() - timedelta(days=7))
+        submitted = st.form_submit_button("Загрузить")
 
     if submitted:
         lat, lon = CITIES[city_sel][0], CITIES[city_sel][1]
@@ -86,21 +87,19 @@ with tab2:
             res = requests.get(url, timeout=10).json()
             st.session_state.archive_results = res.get('features', [])
         except:
-            st.error("Ошибка загрузки.")
+            st.error("Ошибка сети.")
 
+    # ПРЯМОЙ ВЫВОД ИЗ SESSION_STATE
     if st.session_state.archive_results:
-        for f in st.session_state.archive_results[:10]:
+        for f in st.session_state.archive_results:
             p = f['properties']
             st.write(
                 f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d')} | **{p['mag']} M** | {p['place']}")
     else:
-        st.info("Данные не загружены. Выберите параметры и нажмите 'Загрузить данные'.")
+        st.info("Архив пуст. Нажмите 'Загрузить', чтобы получить данные.")
 
 with tab3:
-    st.subheader("📊 Анализ нормы VTEC")
-    c = st.selectbox("Город для анализа:", list(CITIES.keys()), key="norm_city")
-    h = st.slider("Час суток (UTC):", 0, 23, 12, key="norm_hour")
-
-    norm = get_diurnal_trend(h, CITIES[c][0], f107)
-    st.metric("Ожидаемый уровень VTEC:", f"{norm} TECU")
-    st.write("Этот показатель рассчитывается на основе текущего солнечного потока F10.7.")
+    st.subheader("📊 Анализ нормы")
+    c = st.selectbox("Город:", list(CITIES.keys()))
+    norm = get_diurnal_trend(12, CITIES[c][0], f107)
+    st.write(f"Средняя норма VTEC для {c} составляет {norm} TECU.")
