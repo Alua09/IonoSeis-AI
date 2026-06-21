@@ -5,6 +5,7 @@ import requests
 import math
 import time
 from datetime import datetime, timezone, timedelta
+
 # --- КОНФИГУРАЦИЯ ---
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Dashboard")
 
@@ -40,16 +41,21 @@ def get_diurnal_trend(hour, lat, f107):
 # --- ИНТЕРФЕЙС ---
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
-# Подсказка для жюри (Методология)
-with st.expander("ℹ️ Методология мониторинга", expanded=True):
-    st.write("""
-    1. **VTEC:** Индикатор плотности электронов. 
-    2. **Z-score:** Отклонение от модели. 
-    3. **Kp-индекс:** Фильтр солнечного шума.
+# Улучшенные пояснения для жюри
+with st.expander("ℹ️ Методология мониторинга и параметры", expanded=True):
+    st.markdown("""
+    Система проводит комплексный анализ ионосферы для идентификации сейсмических предвестников:
+    * **VTEC (Вертикальное полное электронное содержание):** Основной показатель ионизации. Норма определяется суточным ходом.
+    * **Z-score ($\sigma$):** Статистический порог отклонения. Значение $|Z| > 1.8$ указывает на аномальное поведение плотности электронов.
+    * **Kp-индекс:** Показатель возмущенности магнитного поля Земли. Используется для фильтрации ложных срабатываний, вызванных солнечными бурями.
+    * **F10.7 (Солнечный поток):** Радиоизлучение Солнца, определяющее базовый уровень ионизации атмосферы.
     """)
 
 kp, f107 = get_space_weather_data()
-st.info(f"🌐 Kp: **{kp}** | ☀️ F10.7: **{f107}** | 📡 Радиус: 500 км")
+col_info1, col_info2, col_info3 = st.columns(3)
+col_info1.metric("Kp-индекс", kp, help="Геомагнитная активность: выше 4.0 ионосфера нестабильна")
+col_info2.metric("Поток F10.7", f107, help="Солнечная активность: определяет фоновую плотность ионосферы")
+col_info3.metric("Радиус поиска", "500 км", help="Зона ответственности сейсмического API вокруг эпицентра")
 
 tab1, tab2, tab3 = st.tabs(["🟢 Live-мониторинг", "📂 Сейсмо-архив", "📊 Анализ нормы VTEC"])
 
@@ -64,7 +70,6 @@ with tab1:
     for city, (lat, lon, offset) in CITIES.items():
         st.markdown("---")
         local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
-        # Использование времени для динамики VTEC
         seed = int(time.time() / 10) + hash(city)
         np.random.seed(seed % 1000)
 
@@ -78,20 +83,27 @@ with tab1:
 
         col1, col2, col3, col4 = st.columns([1, 1, 1.5, 2])
         col1.subheader(f"📍 {city}")
-        col1.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ", help="Текущее отклонение от суточной нормы")
+        col1.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ",
+                    help="Текущий уровень и статистическое отклонение от нормы")
 
+        # Информативные статусы с использованием caption для пояснений
         if kp >= 4:
-            col2.warning("☀️ Магнитная активность")
+            col2.warning("☀️ Магнитная буря")
+            col2.caption("VTEC нестабилен из-за активности Солнца")
         elif abs(z) > 1.8:
             col2.error(f"⚠️ Аномалия Z={z:.1f}")
+            col2.caption("Зафиксировано значительное отклонение ионосферы")
         else:
-            col2.success("✅ VTEC в норме", help="Значения ионосферы соответствуют расчетной модели")
+            col2.success("✅ VTEC в норме")
+            col2.caption("Ионосферные показатели стабильны")
 
         if [q for q in quakes_data if math.sqrt(
                 (q['geometry']['coordinates'][1] - lat) ** 2 + (q['geometry']['coordinates'][0] - lon) ** 2) < 4.5]:
-            col3.error("🚨 Сейсмика: Активно", help="Событие USGS в радиусе 500 км")
+            col3.error("🚨 Сейсмика: Активно")
+            col3.caption("Зафиксировано сейсмическое событие")
         else:
             col3.success("✅ Сейсмика: Спокойно")
+            col3.caption("Сейсмическая обстановка в норме")
 
         fig, ax = plt.subplots(figsize=(6, 1))
         ax.plot(st.session_state.history[city], color='cyan')
@@ -101,12 +113,12 @@ with tab1:
 with tab2:
     st.subheader("📂 Сейсмо-архив")
     with st.form("archive_form"):
-        city_sel = st.selectbox("Город:", list(CITIES.keys()), help="Выберите город для анализа архива")
-        date_sel = st.date_input("Дата:", datetime.now() - timedelta(days=7))
-        btn = st.form_submit_button("Загрузить")
+        city_sel = st.selectbox("Выберите город:", list(CITIES.keys()), help="Город для фильтрации сейсмических данных")
+        date_sel = st.date_input("Дата начала:", datetime.now() - timedelta(days=7))
+        btn = st.form_submit_button("Загрузить данные")
 
     if btn:
-        st.session_state.archive_results = None  # Сброс данных для обновления
+        st.session_state.archive_results = None
         lat, lon = CITIES[city_sel][0], CITIES[city_sel][1]
         url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={date_sel.isoformat()}&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=3.0"
         res = requests.get(url).json()
@@ -115,11 +127,12 @@ with tab2:
     if st.session_state.archive_results:
         for f in st.session_state.archive_results[:5]:
             p = f['properties']
-            st.write(f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d')} | {p['mag']} M | {p['place']}")
+            st.write(
+                f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d')} | **{p['mag']} M** | {p['place']}")
 
 with tab3:
     st.subheader("📊 Анализ нормы VTEC")
-    c = st.selectbox("Город:", list(CITIES.keys()), help="Выбор локации для прогноза нормы")
-    h = st.slider("Час (UTC):", 0, 23, 12, help="Ползунок для визуализации суточного хода")
+    c = st.selectbox("Локация:", list(CITIES.keys()), help="Выбор точки для моделирования нормативного VTEC")
+    h = st.slider("Час UTC:", 0, 23, 12, help="Ползунок суточного хода плотности ионосферы")
     norm = get_diurnal_trend(h, CITIES[c][0], f107)
-    st.info(f"Ожидаемый VTEC: **{norm} TECU**.")
+    st.info(f"Расчетный нормативный VTEC для {c} в {h}:00 составляет **{norm} TECU**.")
