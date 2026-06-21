@@ -20,6 +20,18 @@ if 'archive_results' not in st.session_state: st.session_state.archive_results =
 
 
 # --- ФУНКЦИИ ---
+def get_space_weather_data():
+    try:
+        f107 = float(requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
+                                  timeout=3).json()[-1][1])
+        kp = float(
+            requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=3).json()[-1][
+                1])
+        return kp, f107
+    except:
+        return 2.0, 150.0
+
+
 def get_diurnal_trend(hour, lat, f107):
     base = 8.0 + (f107 / 20.0)
     diurnal = base + 15.0 * np.cos(np.pi * (hour - 14) / 12)
@@ -28,49 +40,58 @@ def get_diurnal_trend(hour, lat, f107):
 
 # --- ИНТЕРФЕЙС ---
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
+kp, f107 = get_space_weather_data()
+st.info(f"🌐 Kp: **{kp}** | ☀️ F10.7: **{f107}** | 📡 Радиус: 500 км")
 
 tab1, tab2, tab3 = st.tabs(["🟢 Live-мониторинг", "📂 Сейсмо-архив", "📊 Анализ нормы VTEC"])
 
 with tab1:
-    try:
-        url_quakes = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=" + (
-                    datetime.now() - timedelta(days=1)).isoformat()
-        quakes_data = requests.get(url_quakes, timeout=3).json().get('features', [])
-    except:
-        quakes_data = []
+    # Контейнеры для динамического обновления без перезагрузки всей страницы
+    placeholders = {city: st.empty() for city in CITIES}
 
-    for city, (lat, lon, offset) in CITIES.items():
-        st.markdown("---")
-        local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
-        hour = local_time.hour + local_time.minute / 60.0
+    # Чтобы мониторинг обновлялся, мы используем небольшой цикл с задержкой
+    # Но чтобы не ломать табы, делаем обновление ограниченным
+    for _ in range(5):  # Обновляем 5 раз, затем пользователь может обновить вручную
+        try:
+            url_quakes = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=" + (
+                        datetime.now() - timedelta(days=1)).isoformat()
+            quakes_data = requests.get(url_quakes, timeout=3).json().get('features', [])
+        except:
+            quakes_data = []
 
-        nearby = [q for q in quakes_data if math.sqrt(
-            (q['geometry']['coordinates'][1] - lat) ** 2 + (q['geometry']['coordinates'][0] - lon) ** 2) < 4.5]
+        for city, (lat, lon, offset) in CITIES.items():
+            with placeholders[city].container():
+                st.markdown("---")
+                local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
+                hour = local_time.hour + local_time.minute / 60.0
 
-        base_norm = get_diurnal_trend(hour, lat, 150.0)
-        val = base_norm + np.random.normal(0, 0.5)
+                # Поиск в радиусе 500 км
+                nearby = [q for q in quakes_data if math.sqrt(
+                    (q['geometry']['coordinates'][1] - lat) ** 2 + (q['geometry']['coordinates'][0] - lon) ** 2) < 4.5]
 
-        st.session_state.history[city].append(val)
-        if len(st.session_state.history[city]) > 60: st.session_state.history[city].pop(0)
+                val = get_diurnal_trend(hour, lat, f107) + np.random.normal(0, 0.5)
+                st.session_state.history[city].append(val)
+                if len(st.session_state.history[city]) > 60: st.session_state.history[city].pop(0)
 
-        # Расчет сигма-отклонения для стрелки
-        z = (val - base_norm) / 1.5
+                col1, col2, col3, col4 = st.columns([1, 1, 1.5, 2])
+                col1.subheader(f"📍 {city}")
+                col1.write(f"🕒 {local_time.strftime('%H:%M:%S')}")
+                col2.metric("VTEC", f"{val:.1f}")
 
-        col1, col2, col3, col4 = st.columns([1, 1, 1.5, 2])
-        col1.subheader(f"📍 {city}")
-        # Возвращаем VTEC со стрелкой
-        col1.metric("VTEC", f"{val:.1f}", f"{z:+.1f}σ")
+                if nearby:
+                    col3.error(
+                        f"🚨 {nearby[0]['properties']['mag']}M | {nearby[0]['properties']['place'].split(',')[-1]}")
+                else:
+                    col3.success("✅ Сейсмика: Спокойно")
 
-        if nearby:
-            col2.error(f"🚨 {nearby[0]['properties']['mag']}M | {nearby[0]['properties']['place'].split(',')[-1]}")
-        else:
-            col2.success("✅ Стабильно")
+                fig, ax = plt.subplots(figsize=(6, 1))
+                ax.plot(st.session_state.history[city], color='cyan', lw=2)
+                ax.axis('off')
+                col4.pyplot(fig)
 
-        # Возвращаем бирюзовый график
-        fig, ax = plt.subplots(figsize=(6, 1))
-        ax.plot(st.session_state.history[city], color='cyan', lw=2)
-        ax.axis('off')
-        col4.pyplot(fig)
+        time.sleep(5)
+    st.info(
+        "Обновление приостановлено для стабильности вкладок. Нажмите 'R' или обновите страницу для получения новых данных.")
 
 with tab2:
     st.subheader("📂 Сейсмо-архив")
@@ -80,7 +101,6 @@ with tab2:
         btn = st.form_submit_button("Загрузить данные")
 
     if btn:
-        # ИСПРАВЛЕНИЕ ОШИБКИ: используем [0] и [1] для lat/lon
         lat, lon = CITIES[city_sel][0], CITIES[city_sel][1]
         url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={date_sel.isoformat()}&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=3.0"
         res = requests.get(url).json()
