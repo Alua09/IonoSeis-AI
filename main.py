@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import requests
 import math
 import time
-import streamlit.components.v1 as components
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
@@ -16,10 +15,8 @@ CITIES = {
     "Токио": (35.68, 139.65, 9)
 }
 
-if 'history' not in st.session_state:
-    st.session_state.history = {city: [] for city in CITIES}
-if 'archive_results' not in st.session_state:
-    st.session_state.archive_results = None
+if 'history' not in st.session_state: st.session_state.history = {city: [] for city in CITIES}
+if 'archive_results' not in st.session_state: st.session_state.archive_results = None
 
 
 # --- НАУЧНЫЕ ФУНКЦИИ ---
@@ -49,7 +46,6 @@ st.info(f"🌐 Kp: **{kp}** | ☀️ F10.7: **{f107}** | 📡 Радиус по�
 tab1, tab2 = st.tabs(["🟢 Мониторинг (Live)", "📂 Архив землетрясений"])
 
 with tab1:
-    # Запрос данных (раз в 30 секунд для экономии ресурсов)
     try:
         url_quakes = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=" + (
                     datetime.now() - timedelta(days=1)).isoformat()
@@ -62,7 +58,7 @@ with tab1:
         local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
         hour = local_time.hour + local_time.minute / 60.0
 
-        # Сейсмика: 500 км ~ 4.5 градуса
+        # Поиск землетрясений в радиусе 500 км (~4.5 градуса)
         nearby = [q for q in quakes_data if math.sqrt(
             (q['geometry']['coordinates'][1] - lat) ** 2 + (q['geometry']['coordinates'][0] - lon) ** 2) < 4.5]
 
@@ -72,9 +68,8 @@ with tab1:
         st.session_state.history[city].append(val)
         if len(st.session_state.history[city]) > 60: st.session_state.history[city].pop(0)
 
-        # Более строгий расчет Z-score
         z = (val - base_norm) / (1.5 + (kp * 0.3))
-        is_anomaly = abs(z) > 1.8  # Увеличили порог, чтобы меньше «шумело»
+        is_anomaly = abs(z) > 1.8
 
         col1, col2, col3, col4 = st.columns([1, 1, 1.5, 2])
         col1.subheader(f"📍 {city}")
@@ -86,9 +81,12 @@ with tab1:
         else:
             col3.success(f"✅ Стабильно (Z={z:.1f})")
 
+        # Сейсмический статус с порогом M5.0 для тревоги
         if nearby:
             q = nearby[0]['properties']
-            col3.write(f"⚡ **{q['mag']}M** | {q['place'].split(',')[-1]}")
+            mag = q['mag']
+            status = "🚨 ТРЕВОГА" if mag >= 5.0 else "⚡ Сейсмика"
+            col3.write(f"{status}: **{mag}M** | {q['place'].split(',')[-1]}")
         else:
             col3.write("✅ Сейсмика: Спокойно")
 
@@ -97,28 +95,33 @@ with tab1:
         ax.axis('off')
         col4.pyplot(fig)
 
-    time.sleep(8)  # Увеличили интервал до 8 секунд для плавности
+    time.sleep(8)
     st.rerun()
 
 with tab2:
-    # Архив остается неизменным, так как он надежен
-    st.subheader("Поиск архивных данных (USGS)")
+    st.subheader("🔍 Глубокий поиск по архиву USGS")
     with st.form(key='archive_form'):
-        city_sel = st.selectbox("Выберите город:", list(CITIES.keys()))
-        date_sel = st.date_input("Дата:", datetime.now() - timedelta(days=7))
-        submitted = st.form_submit_button("Найти")
+        col_a, col_b = st.columns(2)
+        city_sel = col_a.selectbox("Город для привязки:", list(CITIES.keys()))
+        mag_min = col_b.slider("Минимальная магнитуда:", 2.0, 8.0, 3.0)
+        date_sel = st.date_input("Дата начала поиска:", datetime.now() - timedelta(days=30))
+        submitted = st.form_submit_button("Начать поиск")
 
     if submitted:
         lat, lon = CITIES[city_sel][0], CITIES[city_sel][1]
-        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={date_sel.isoformat()}&endtime={(date_sel + timedelta(days=30)).isoformat()}&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=2.0"
+        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={date_sel.isoformat()}&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude={mag_min}"
         try:
             res = requests.get(url, timeout=10).json()
             st.session_state.archive_results = res.get('features', [])
         except:
-            st.error("Ошибка сети.")
+            st.error("Ошибка сети при обращении к USGS.")
 
     if st.session_state.archive_results is not None:
-        for f in st.session_state.archive_results[:10]:
-            p = f['properties']
-            st.error(
-                f"⚠️ {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d')} | **{p['mag']} M** | {p['place']}")
+        if st.session_state.archive_results:
+            st.write(f"Найдено событий: {len(st.session_state.archive_results)}")
+            for f in st.session_state.archive_results[:15]:  # Вывод 15 последних
+                p = f['properties']
+                st.write(
+                    f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d %H:%M')} | ⚡ **{p['mag']} M** | 📍 {p['place']}")
+        else:
+            st.warning("Событий не найдено. Попробуйте изменить параметры поиска.")
