@@ -43,7 +43,7 @@ st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 kp, f107 = get_space_weather_data()
 st.info(f"🌐 Kp: **{kp}** | ☀️ F10.7: **{f107}** | 📡 Радиус поиска: 500 км")
 
-tab1, tab2 = st.tabs(["🟢 Мониторинг (Live)", "📂 Архив землетрясений"])
+tab1, tab2, tab3 = st.tabs(["🟢 Live-мониторинг", "📂 Сейсмо-архив", "📊 Анализ нормы VTEC"])
 
 with tab1:
     try:
@@ -58,7 +58,6 @@ with tab1:
         local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
         hour = local_time.hour + local_time.minute / 60.0
 
-        # Поиск землетрясений в радиусе 500 км (~4.5 градуса)
         nearby = [q for q in quakes_data if math.sqrt(
             (q['geometry']['coordinates'][1] - lat) ** 2 + (q['geometry']['coordinates'][0] - lon) ** 2) < 4.5]
 
@@ -73,22 +72,18 @@ with tab1:
 
         col1, col2, col3, col4 = st.columns([1, 1, 1.5, 2])
         col1.subheader(f"📍 {city}")
-        col1.caption(f"🕒 {local_time.strftime('%H:%M:%S')}")
-        col2.metric("VTEC", f"{val:.1f}", f"{z:+.1f}σ")
+        col1.metric("VTEC", f"{val:.1f}", f"{z:+.1f}σ")
 
         if is_anomaly:
-            col3.error(f"⚠️ АНОМАЛИЯ (Z={z:.1f})")
+            col2.error(f"⚠️ АНОМАЛИЯ (Z={z:.1f})")
         else:
-            col3.success(f"✅ Стабильно (Z={z:.1f})")
+            col2.success(f"✅ Стабильно (Z={z:.1f})")
 
-        # Сейсмический статус с порогом M5.0 для тревоги
         if nearby:
             q = nearby[0]['properties']
-            mag = q['mag']
-            status = "🚨 ТРЕВОГА" if mag >= 5.0 else "⚡ Сейсмика"
-            col3.write(f"{status}: **{mag}M** | {q['place'].split(',')[-1]}")
+            col2.write(f"🚨 **{q['mag']}M** | {q['place'].split(',')[-1]}")
         else:
-            col3.write("✅ Сейсмика: Спокойно")
+            col2.write("✅ Сейсмика: Спокойно")
 
         fig, ax = plt.subplots(figsize=(6, 1))
         ax.plot(st.session_state.history[city], color='red' if is_anomaly else 'cyan', lw=2)
@@ -101,10 +96,9 @@ with tab1:
 with tab2:
     st.subheader("🔍 Глубокий поиск по архиву USGS")
     with st.form(key='archive_form'):
-        col_a, col_b = st.columns(2)
-        city_sel = col_a.selectbox("Город для привязки:", list(CITIES.keys()))
-        mag_min = col_b.slider("Минимальная магнитуда:", 2.0, 8.0, 3.0)
-        date_sel = st.date_input("Дата начала поиска:", datetime.now() - timedelta(days=30))
+        city_sel = st.selectbox("Город:", list(CITIES.keys()))
+        mag_min = st.slider("Мин. магнитуда:", 2.0, 8.0, 3.0)
+        date_sel = st.date_input("Дата начала:", datetime.now() - timedelta(days=30))
         submitted = st.form_submit_button("Начать поиск")
 
     if submitted:
@@ -113,15 +107,22 @@ with tab2:
         try:
             res = requests.get(url, timeout=10).json()
             st.session_state.archive_results = res.get('features', [])
+            st.rerun()
         except:
-            st.error("Ошибка сети при обращении к USGS.")
+            st.error("Ошибка сети.")
 
-    if st.session_state.archive_results is not None:
-        if st.session_state.archive_results:
-            st.write(f"Найдено событий: {len(st.session_state.archive_results)}")
-            for f in st.session_state.archive_results[:15]:  # Вывод 15 последних
-                p = f['properties']
-                st.write(
-                    f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d %H:%M')} | ⚡ **{p['mag']} M** | 📍 {p['place']}")
-        else:
-            st.warning("Событий не найдено. Попробуйте изменить параметры поиска.")
+    if st.session_state.archive_results:
+        st.success(f"Найдено событий: {len(st.session_state.archive_results)}")
+        for f in st.session_state.archive_results[:15]:
+            p = f['properties']
+            st.write(
+                f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d %H:%M')} | ⚡ **{p['mag']} M** | 📍 {p['place']}")
+
+with tab3:
+    st.subheader("📊 Анализ суточной нормы")
+    c = st.selectbox("Город для проверки:", list(CITIES.keys()))
+    h = st.slider("Час суток (UTC):", 0, 23, 12)
+    norm = get_diurnal_trend(h, CITIES[c][0], 150.0)
+    st.info(f"Для города {c} в {h}:00 UTC ожидаемый уровень VTEC составляет **{norm} TECU**.")
+    st.write(
+        "Используйте это значение для сравнения с Live-мониторингом. Если текущий VTEC отклоняется от нормы более чем на 3.0σ — это объект для пристального внимания.")
