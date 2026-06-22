@@ -66,10 +66,14 @@ with tab1:
         col1.subheader(f"📍 {city}")
         col1.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ", help="Текущее отклонение от нормы")
 
-        col2.success("✅ VTEC в норме") if abs(z) <= 1.8 else col2.error(f"⚠️ Аномалия Z={z:.1f}")
+        # Исправленный блок условий
+        if abs(z) <= 1.8:
+            col2.success("✅ VTEC в норме")
+        else:
+            col2.error(f"⚠️ Аномалия Z={z:.1f}")
+
         col3.success("✅ Сейсмика: Спокойно")
 
-        # Бирюзовая линия через line_chart
         chart_data = np.array(st.session_state.history[city])
         col4.line_chart(chart_data, color="#00FFFF")
 
