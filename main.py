@@ -15,7 +15,6 @@ CITIES = {
 
 if 'history' not in st.session_state: st.session_state.history = {city: [] for city in CITIES}
 if 'archive_results' not in st.session_state: st.session_state.archive_results = None
-if 'last_params' not in st.session_state: st.session_state.last_params = {}
 
 
 # --- ФУНКЦИИ ---
@@ -37,61 +36,49 @@ def get_diurnal_trend(hour, lat, f107):
     return round(diurnal * (np.cos(np.radians(lat))), 1)
 
 
+# --- ФРАГМЕНТ ДЛЯ АВТО-ОБНОВЛЕНИЯ (VTEC) ---
+@st.fragment(run_every="3s")
+def live_vtec_monitor(f107):
+    for city, (lat, lon, offset) in CITIES.items():
+        st.markdown("---")
+        local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
+        hour = local_time.hour + local_time.minute / 60.0
+        norm = get_diurnal_trend(hour, lat, f107)
+        val = norm + np.random.normal(0, 0.4)
+        z = (val - norm) / 1.5
+
+        st.session_state.history[city].append(val)
+        if len(st.session_state.history[city]) > 20: st.session_state.history[city].pop(0)
+
+        c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
+        c1.metric(f"📍 {city} ({local_time.strftime('%H:%M')})", f"{val:.1f} TECU", f"{z:+.1f}σ",
+                  help="Текущее значение")
+
+        if abs(z) <= 1.8:
+            c2.success("✅ VTEC в норме")
+        else:
+            c2.error(f"⚠️ Аномалия Z={z:.1f}")
+        c3.success("✅ Сейсмика: Спокойно")
+        c4.line_chart(st.session_state.history[city], color="#00FFFF")
+
+
 # --- ИНТЕРФЕЙС ---
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
-with st.expander("ℹ️ Методология мониторинга", expanded=True):
-    st.markdown("Анализ VTEC (Z-score > 1.8), фильтрация магнитных бурь (Kp) и мониторинг сейсмо-активности USGS.")
-
 kp, f107 = get_space_weather_data()
-col_info1, col_info2, col_info3 = st.columns(3)
-col_info1.metric("Kp-индекс", kp, help="Геомагнитная активность: выше 4.0 ионосфера нестабильна")
-col_info2.metric("Поток F10.7", f107, help="Солнечная активность: определяет фоновую плотность ионосферы")
-col_info3.metric("Радиус поиска", "500 км", help="Зона ответственности сейсмического API вокруг эпицентра")
+st.info(f"🌐 Kp: **{kp}** | ☀️ F10.7: **{f107}** | UTC: **{datetime.now(timezone.utc).strftime('%H:%M:%S')}**")
 
 tab1, tab2, tab3 = st.tabs(["🟢 Live-мониторинг", "📂 Сейсмо-архив", "📊 Анализ нормы VTEC"])
 
 with tab1:
-    # Контейнер для автоматического обновления VTEC
-    live_placeholder = st.empty()
-    for _ in range(10):  # Цикл обновления внутри Streamlit
-        with live_placeholder.container():
-            np.random.seed(int(time.time()))
-            for city, (lat, lon, offset) in CITIES.items():
-                st.markdown("---")
-                local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
-                hour = local_time.hour + local_time.minute / 60.0
-                norm = get_diurnal_trend(hour, lat, f107)
-                val = norm + np.random.normal(0, 0.4)
-                z = (val - norm) / 1.5
-
-                st.session_state.history[city].append(val)
-                if len(st.session_state.history[city]) > 20: st.session_state.history[city].pop(0)
-
-                c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
-                c1.metric(f"📍 {city} ({local_time.strftime('%H:%M')})", f"{val:.1f} TECU", f"{z:+.1f}σ",
-                          help="Текущее значение и отклонение Z-score")
-
-                if abs(z) <= 1.8:
-                    c2.success("✅ VTEC в норме")
-                else:
-                    c2.error(f"⚠️ Аномалия Z={z:.1f}")
-                c3.success("✅ Сейсмика: Спокойно")
-                c4.line_chart(st.session_state.history[city], color="#00FFFF")
-        time.sleep(3)  # Обновление каждые 3 сек
-        st.rerun()
+    live_vtec_monitor(f107)
 
 with tab2:
     st.subheader("📂 Сейсмо-архив")
     city_sel = st.selectbox("Выберите город:", list(CITIES.keys()), help="Город для поиска")
     date_sel = st.date_input("Дата начала:", datetime.now() - timedelta(days=7))
 
-    # Сброс архива при изменении параметров
-    if city_sel != st.session_state.last_params.get('city') or date_sel != st.session_state.last_params.get('date'):
-        st.session_state.archive_results = None
-        st.session_state.last_params = {'city': city_sel, 'date': date_sel}
-
-    if st.button("📂 Загрузить данные архива"):
+    if st.button("📂 Загрузить данные"):
         lat, lon = CITIES[city_sel][0], CITIES[city_sel][1]
         url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={date_sel.isoformat()}&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=3.0"
         res = requests.get(url, timeout=3).json()
@@ -102,7 +89,7 @@ with tab2:
             p = f['properties']
             st.write(
                 f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d')} | **{p['mag']} M** | {p['place']}")
-    elif st.session_state.archive_results == []:
+    elif st.session_state.archive_results is not None:
         st.write("Событий не найдено.")
 
 with tab3:
