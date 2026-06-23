@@ -15,7 +15,6 @@ CITIES = {
 
 if 'history' not in st.session_state: st.session_state.history = {city: [] for city in CITIES}
 if 'archive_results' not in st.session_state: st.session_state.archive_results = None
-if 'last_params' not in st.session_state: st.session_state.last_params = {}
 
 
 # --- ФУНКЦИИ ---
@@ -52,7 +51,6 @@ col_info3.metric("Радиус поиска", "500 км", help="Зона отв�
 tab1, tab2, tab3 = st.tabs(["🟢 Live-мониторинг", "📂 Сейсмо-архив", "📊 Анализ нормы VTEC"])
 
 with tab1:
-    # Генерируем новые данные при каждом обновлении
     np.random.seed(int(time.time()))
     for city, (lat, lon, offset) in CITIES.items():
         st.markdown("---")
@@ -76,18 +74,17 @@ with tab1:
         c3.success("✅ Сейсмика: Спокойно")
         c4.line_chart(st.session_state.history[city], color="#00FFFF")
 
-    if st.button("🔄 Обновить Live-данные"):
-        st.rerun()
+    time.sleep(3)  # Пауза перед обновлением
+    st.rerun()  # Автоматически обновляет Live данные
 
 with tab2:
     st.subheader("📂 Сейсмо-архив")
-    with st.form("archive_form"):
+    with st.form("archive_form", clear_on_submit=False):
         city_sel = st.selectbox("Выберите город:", list(CITIES.keys()), help="Город для поиска")
         date_sel = st.date_input("Дата начала:", datetime.now() - timedelta(days=7))
         btn = st.form_submit_button("Загрузить данные")
 
     if btn:
-        st.session_state.archive_results = None
         lat, lon = CITIES[city_sel][0], CITIES[city_sel][1]
         url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={date_sel.isoformat()}&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=3.0"
         res = requests.get(url, timeout=3).json()
@@ -98,7 +95,7 @@ with tab2:
             p = f['properties']
             st.write(
                 f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d')} | **{p['mag']} M** | {p['place']}")
-    elif st.session_state.archive_results is not None:
+    elif btn and not st.session_state.archive_results:
         st.write("Событий не найдено.")
 
 with tab3:
