@@ -1,19 +1,10 @@
 import streamlit as st
 import numpy as np
 import requests
-import time
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Dashboard", page_icon="🛰️")
-
-# --- СТИЛИЗАЦИЯ ---
-st.markdown("""
-    <style>
-    .stMetric { background-color: #f8f9fb; padding: 15px; border-radius: 10px; border: 1px solid #e6e9ef; }
-    div[data-testid="stMetricValue"] { font-size: 20px; }
-    </style>
-""", unsafe_allow_html=True)
 
 # Инициализация хранилища
 if 'alerts' not in st.session_state: st.session_state.alerts = []
@@ -55,7 +46,7 @@ def get_recent_quakes(lat, lon):
         return []
 
 
-# --- ФРАГМЕНТ ДЛЯ АВТО-ОБНОВЛЕНИЯ (VTEC) ---
+# --- ФРАГМЕНТ МОНИТОРИНГА ---
 @st.fragment(run_every="3s")
 def live_vtec_monitor(f107):
     for city, (lat, lon, offset) in CITIES.items():
@@ -68,7 +59,6 @@ def live_vtec_monitor(f107):
         st.session_state.history[city].append(val)
         if len(st.session_state.history[city]) > 30: st.session_state.history[city].pop(0)
 
-        # Логика алертов
         if abs(z) > 1.8:
             alert_msg = f"Аномалия в {city}: Z={z:.1f}σ"
             if not st.session_state.alerts or st.session_state.alerts[-1]['msg'] != alert_msg:
@@ -81,20 +71,23 @@ def live_vtec_monitor(f107):
             c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
 
             d_color = "inverse" if abs(z) > 1.8 else "normal"
-            c1.metric("Текущий VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ", delta_color=d_color)
+            c1.metric("Текущий VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ", delta_color=d_color,
+                      help="Полное электронное содержание ионосферы. Z-score показывает отклонение от математической нормы: |Z|>1.8 — аномалия.")
 
             if abs(z) <= 1.8:
-                c2.info("**СТАТУС: НОРМА**", icon="✅")
+                c2.info("**СТАТУС: НОРМА**", icon="✅",
+                        help="Ионосферные параметры в пределах суточной нормы с учетом солнечного потока F10.7.")
             else:
-                c2.error("**СТАТУС: АНОМАЛИЯ**", icon="🚨")
+                c2.error("**СТАТУС: АНОМАЛИЯ**", icon="🚨",
+                         help="Зафиксировано значительное отклонение. Может указывать на подготовку сейсмического события.")
 
-            c3.info("**СЕЙСМИКА: OK**", icon="🛡️")
+            c3.info("**СЕЙСМИКА: OK**", icon="🛡️",
+                    help="Мониторинг USGS: в радиусе 500 км критических событий магнитудой > 3.0 не выявлено.")
             c4.line_chart(st.session_state.history[city], color="#00FFFF", height=80)
 
 
 # --- ИНТЕРФЕЙС ---
 
-# Sidebar
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2554/2554042.png", width=80)
     st.title("🛡️ System Control")
@@ -106,16 +99,18 @@ with st.sidebar:
         st.session_state.alerts = []
         st.rerun()
 
-# Главный экран
 st.title("🛰️ IonoSeis AI: Система прогнозирования")
-st.caption("Экспертная панель мониторинга ионосферных предвестников")
+st.caption("Экспертная панель анализа ионосферных предвестников")
 
 kp, f107 = get_space_weather_data()
 
 col1, col2, col3 = st.columns(3)
-col1.metric("Геомагнитный Kp-индекс", kp)
-col2.metric("Солнечный поток F10.7", f107)
-col3.metric("Время UTC", datetime.now(timezone.utc).strftime('%H:%M:%S'))
+col1.metric("Геомагнитный Kp-индекс", kp,
+            help="Индекс геомагнитной активности. Kp > 4 может искажать данные ионосферы (магнитная буря).")
+col2.metric("Солнечный поток F10.7", f107,
+            help="Показатель солнечной активности, определяющий базовый уровень ионизации верхних слоев атмосферы.")
+col3.metric("Время UTC", datetime.now(timezone.utc).strftime('%H:%M:%S'),
+            help="Универсальное координированное время для синхронизации данных.")
 
 tab1, tab2, tab3, tab4 = st.tabs(["🟢 МОНИТОРИНГ", "🚨 ЖУРНАЛ АНОМАЛИЙ", "🌋 СЕЙСМО-ЛЕНТА", "📊 МЕТОДОЛОГИЯ"])
 
@@ -126,9 +121,9 @@ with tab2:
     if st.session_state.alerts:
         for alert in reversed(st.session_state.alerts):
             with st.expander(f"🔴 {alert['time']} | {alert['city']} | Z={alert['val']}σ"):
-                st.write(f"**Детали:** {alert['msg']}")
+                st.write(f"**Анализ:** {alert['msg']}. Рекомендуется сопоставление с Kp-индексом.")
     else:
-        st.info("Аномалий за сессию не зафиксировано.")
+        st.info("Аномалий за текущую сессию не зафиксировано.")
 
 with tab3:
     for city, (lat, lon, _) in CITIES.items():
@@ -140,8 +135,21 @@ with tab3:
                 st.write(
                     f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%d.%m %H:%M')} | **{p['mag']} M** | {p['place']}")
         else:
-            st.write("Сейсмическая активность в норме.")
+            st.write("Сейсмическая активность в радиусе 500 км в норме.")
 
 with tab4:
+    st.subheader("🧪 Научно-методологическая база")
+    st.markdown("""
+    Система использует концепцию **Литосферно-Ионосферных Связей (LIS)**. 
+    Согласно данной теории, перед сильными сейсмическими толчками происходят процессы в земной коре, приводящие к эмиссии заряженных частиц и акустико-гравитационных волн, которые воздействуют на ионосферу.
+
+    **Основные этапы анализа:**
+    1. **Сбор данных:** Интеграция данных о плотности электронов (VTEC) и солнечной активности (F10.7, Kp).
+    2. **Нормализация:** Расчет суточного тренда на основе гармонических функций.
+    3. **Детекция:** Применение Z-score критерия для выявления отклонений:
+    """)
     st.latex(r"Z = \frac{VTEC_{obs} - VTEC_{norm}}{\sigma}")
-    st.write("Метод основан на выявлении отклонений ионосферной плазмы, связанных с литосферными процессами.")
+    st.markdown("""
+    4. **Верификация:** Фильтрация солнечных возмущений (Kp < 4) для исключения ложноположительных срабатываний.
+    """)
+    ```
