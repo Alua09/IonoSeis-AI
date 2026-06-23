@@ -16,6 +16,7 @@ CITIES = {
 if 'history' not in st.session_state: st.session_state.history = {city: [] for city in CITIES}
 if 'archive_results' not in st.session_state: st.session_state.archive_results = None
 if 'last_update' not in st.session_state: st.session_state.last_update = time.time()
+if 'last_params' not in st.session_state: st.session_state.last_params = {}
 
 
 # --- ФУНКЦИИ ---
@@ -47,9 +48,9 @@ st.info(
 tab1, tab2, tab3 = st.tabs(["🟢 Live-мониторинг", "📂 Сейсмо-архив", "📊 Анализ нормы VTEC"])
 
 with tab1:
+    np.random.seed(int(time.time()))  # Обеспечивает изменение значений
     for city, (lat, lon, offset) in CITIES.items():
         st.markdown("---")
-        # Расчет времени и VTEC
         local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
         hour = local_time.hour + local_time.minute / 60.0
         norm = get_diurnal_trend(hour, lat, f107)
@@ -60,7 +61,6 @@ with tab1:
         if len(st.session_state.history[city]) > 20: st.session_state.history[city].pop(0)
 
         c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
-        # Показатель со стрелкой (delta)
         c1.metric(f"📍 {city} ({local_time.strftime('%H:%M')})", f"{val:.1f} TECU", f"{z:+.1f}σ")
 
         if abs(z) <= 1.8:
@@ -70,7 +70,6 @@ with tab1:
         c3.success("✅ Сейсмика: Спокойно")
         c4.line_chart(st.session_state.history[city], color="#00FFFF")
 
-    # Авто-обновление страницы через 3 секунды
     if time.time() - st.session_state.last_update > 3:
         st.session_state.last_update = time.time()
         st.rerun()
@@ -82,19 +81,25 @@ with tab2:
         date_sel = st.date_input("Дата начала:", datetime.now() - timedelta(days=7))
         btn = st.form_submit_button("Загрузить данные")
 
+    # Сброс данных, если пользователь изменил параметры поиска
+    if city_sel != st.session_state.last_params.get('city') or date_sel != st.session_state.last_params.get('date'):
+        st.session_state.archive_results = None
+        st.session_state.last_params = {'city': city_sel, 'date': date_sel}
+
     if btn:
         lat, lon = CITIES[city_sel][0], CITIES[city_sel][1]
         url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={date_sel.isoformat()}&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=3.0"
         res = requests.get(url, timeout=3).json()
         st.session_state.archive_results = res.get('features', [])
 
-    if st.session_state.archive_results:
-        for f in st.session_state.archive_results[:5]:
-            p = f['properties']
-            st.write(
-                f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d')} | **{p['mag']} M** | {p['place']}")
-    elif st.session_state.archive_results is not None:
-        st.write("Событий не найдено.")
+    if st.session_state.archive_results is not None:
+        if st.session_state.archive_results:
+            for f in st.session_state.archive_results[:5]:
+                p = f['properties']
+                st.write(
+                    f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d')} | **{p['mag']} M** | {p['place']}")
+        else:
+            st.write("Событий не найдено.")
 
 with tab3:
     st.subheader("📊 Анализ нормы VTEC")
