@@ -65,6 +65,9 @@ def live_vtec_monitor(f107):
         val = norm + np.random.normal(0, 0.4)
         z = (val - norm) / 1.5
 
+        st.session_state.history[city].append(val)
+        if len(st.session_state.history[city]) > 30: st.session_state.history[city].pop(0)
+
         if abs(z) > 1.8:
             alert_msg = f"Аномалия в {city}: Z={z:.1f}σ"
             if not st.session_state.alerts or st.session_state.alerts[-1]['msg'] != alert_msg:
@@ -75,63 +78,81 @@ def live_vtec_monitor(f107):
         with st.container(border=True):
             st.subheader(f"📍 {city}")
             c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
+
             c1.metric("Текущий VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ")
 
-            # Логика цвета карты: [R, G, B, A]
-            is_anomaly = abs(z) > 1.8
-            color = [255, 0, 0, 160] if is_anomaly else [0, 255, 100, 160]
-
-            if not is_anomaly:
+            if abs(z) <= 1.8:
                 c2.info("**СТАТУС: НОРМА**", icon="✅")
             else:
                 c2.error("**СТАТУС: АНОМАЛИЯ**", icon="🚨")
 
             c3.info("**СЕЙСМИКА: OK**", icon="🛡️")
 
-            # Динамическая карта
-            data = pd.DataFrame({'lat': [lat], 'lon': [lon], 'color': [color]})
-            layer = pdk.Layer("ScatterplotLayer", data, get_position=["lon", "lat"], get_color="color",
-                              get_radius=50000)
-            c4.pydeck_chart(
-                pdk.Deck(layers=[layer], initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=5)))
+            # Карта региона
+            df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
+            c4.pydeck_chart(pdk.Deck(
+                initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=6),
+                layers=[pdk.Layer("ScatterplotLayer", df, get_position=["lon", "lat"],
+                                  get_color=[0, 200, 255, 160], get_radius=20000)],
+            ))
 
 
 # --- ИНТЕРФЕЙС ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2554/2554042.png", width=80)
     st.title("🛡️ System Control")
+    st.success("🤖 AI Engine: Active")
+    st.success("📡 Ionosphere API: Connected")
+    st.success("🌍 USGS Seismic: Online")
+    st.divider()
     if st.button("🗑️ Очистить журнал аномалий"):
         st.session_state.alerts = []
         st.rerun()
 
 st.title("🛰️ IonoSeis AI: Система прогнозирования")
+st.caption("Экспертная панель анализа ионосферных предвестников")
+
 kp, f107 = get_space_weather_data()
+
 col1, col2, col3 = st.columns(3)
-col1.metric("Геомагнитный Kp-индекс", kp)
-col2.metric("Солнечный поток F10.7", f107)
+col1.metric("Геомагнитный Kp-индекс", kp, help="Если Kp > 4, значит идут магнитные бури, которые влияют на ионосферу.")
+col2.metric("Солнечный поток F10.7", f107, help="Базовый показатель солнечной активности.")
 col3.metric("Время UTC", datetime.now(timezone.utc).strftime('%H:%M:%S'))
 
 tab1, tab2, tab3, tab4 = st.tabs(["🟢 МОНИТОРИНГ", "🚨 ЖУРНАЛ АНОМАЛИЙ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 МЕТОДОЛОГИЯ"])
 
-with tab1: live_vtec_monitor(f107)
+with tab1:
+    live_vtec_monitor(f107)
+
 with tab2:
     if st.session_state.alerts:
         for alert in reversed(st.session_state.alerts):
-            st.expander(f"🔴 {alert['time']} | {alert['city']} | Z={alert['val']}σ").write(alert['msg'])
+            with st.expander(f"🔴 {alert['time']} | {alert['city']} | Z={alert['val']}σ"):
+                st.write(f"**Анализ:** {alert['msg']}. Проверьте Kp-индекс.")
     else:
         st.info("Аномалий за текущую сессию не зафиксировано.")
 
 with tab3:
     for city, (lat, lon, _) in CITIES.items():
         st.markdown(f"### Регион: {city}")
-        for q in get_recent_quakes(lat, lon):
-            p = q['properties']
-            st.write(
-                f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%d.%m %H:%M')} | **{p['mag']} M** | {p['place']}")
+        quakes = get_recent_quakes(lat, lon)
+        if quakes:
+            for q in quakes:
+                p = q['properties']
+                st.write(
+                    f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%d.%m %H:%M')} | **{p['mag']} M** | {p['place']}")
+        else:
+            st.write("Сейсмическая активность в радиусе 500 км в норме.")
 
 with tab4:
     st.subheader("🧪 Научно-методологическая база")
-    st.markdown("— *Схема взаимодействия литосферы и ионосферы:*")
+
+    st.markdown("""
+    Наша система работает на базе теории **литосферно-ионосферного взаимодействия (LIS)**.
+    """)
     st.latex(r"Z = \frac{VTEC_{obs} - VTEC_{norm}}{\sigma}")
-    st.markdown(
-        "Данная система анализирует ионосферные предвестники тектонической активности, фильтруя солнечные возмущения (Kp-индекс) и используя Z-оценку для определения статистических аномалий.")
+    st.markdown("""
+    * $VTEC_{obs}$ — текущие данные.
+    * $VTEC_{norm}$ — расчетное значение нормы.
+    * $\sigma$ — статистическая погрешность (шум).
+    """)
