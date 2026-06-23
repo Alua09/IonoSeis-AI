@@ -2,6 +2,7 @@ import streamlit as st
 import numpy as np
 import requests
 import pandas as pd
+import pydeck as pdk
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
@@ -16,6 +17,7 @@ st.markdown("""
 
 # Инициализация хранилища
 if 'alerts' not in st.session_state: st.session_state.alerts = []
+if 'history' not in st.session_state: st.session_state.history = {city: [] for city in ["Алматы", "Бишкек", "Токио"]}
 
 CITIES = {
     "Алматы": (43.25, 76.92, 5),
@@ -75,17 +77,23 @@ def live_vtec_monitor(f107):
             c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
             c1.metric("Текущий VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ")
 
-            if abs(z) <= 1.8:
+            # Логика цвета карты: [R, G, B, A]
+            is_anomaly = abs(z) > 1.8
+            color = [255, 0, 0, 160] if is_anomaly else [0, 255, 100, 160]
+
+            if not is_anomaly:
                 c2.info("**СТАТУС: НОРМА**", icon="✅")
             else:
                 c2.error("**СТАТУС: АНОМАЛИЯ**", icon="🚨")
 
             c3.info("**СЕЙСМИКА: OK**", icon="🛡️")
 
-            # Визуализация региона на карте
-            c4.caption("Локация региона:")
-            df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
-            c4.map(df, zoom=5, use_container_width=True)
+            # Динамическая карта
+            data = pd.DataFrame({'lat': [lat], 'lon': [lon], 'color': [color]})
+            layer = pdk.Layer("ScatterplotLayer", data, get_position=["lon", "lat"], get_color="color",
+                              get_radius=50000)
+            c4.pydeck_chart(
+                pdk.Deck(layers=[layer], initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=5)))
 
 
 # --- ИНТЕРФЕЙС ---
@@ -99,8 +107,8 @@ with st.sidebar:
 st.title("🛰️ IonoSeis AI: Система прогнозирования")
 kp, f107 = get_space_weather_data()
 col1, col2, col3 = st.columns(3)
-col1.metric("Kp-индекс", kp)
-col2.metric("Поток F10.7", f107)
+col1.metric("Геомагнитный Kp-индекс", kp)
+col2.metric("Солнечный поток F10.7", f107)
 col3.metric("Время UTC", datetime.now(timezone.utc).strftime('%H:%M:%S'))
 
 tab1, tab2, tab3, tab4 = st.tabs(["🟢 МОНИТОРИНГ", "🚨 ЖУРНАЛ АНОМАЛИЙ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 МЕТОДОЛОГИЯ"])
@@ -111,11 +119,11 @@ with tab2:
         for alert in reversed(st.session_state.alerts):
             st.expander(f"🔴 {alert['time']} | {alert['city']} | Z={alert['val']}σ").write(alert['msg'])
     else:
-        st.info("Аномалий не зафиксировано.")
+        st.info("Аномалий за текущую сессию не зафиксировано.")
 
 with tab3:
     for city, (lat, lon, _) in CITIES.items():
-        st.markdown(f"### {city}")
+        st.markdown(f"### Регион: {city}")
         for q in get_recent_quakes(lat, lon):
             p = q['properties']
             st.write(
@@ -124,6 +132,6 @@ with tab3:
 with tab4:
     st.subheader("🧪 Научно-методологическая база")
     st.markdown("— *Схема взаимодействия литосферы и ионосферы:*")
-
     st.latex(r"Z = \frac{VTEC_{obs} - VTEC_{norm}}{\sigma}")
-    st.markdown("Система использует Z-оценку для фильтрации шумов и выявления сейсмических предвестников.")
+    st.markdown(
+        "Данная система анализирует ионосферные предвестники тектонической активности, фильтруя солнечные возмущения (Kp-индекс) и используя Z-оценку для определения статистических аномалий.")
