@@ -42,14 +42,14 @@ st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
 kp, f107 = get_space_weather_data()
 st.info(
-    f"🌐 Kp: **{kp}** | ☀️ F10.7: **{f107}** | Локальное время (UTC): **{datetime.now(timezone.utc).strftime('%H:%M:%S')}**")
+    f"🌐 Kp-индекс: **{kp}** | ☀️ Поток F10.7: **{f107}** | UTC: **{datetime.now(timezone.utc).strftime('%H:%M:%S')}**")
 
 tab1, tab2, tab3 = st.tabs(["🟢 Live-мониторинг", "📂 Сейсмо-архив", "📊 Анализ нормы VTEC"])
 
 with tab1:
     for city, (lat, lon, offset) in CITIES.items():
         st.markdown("---")
-        # Расчет данных
+        # Расчет времени и VTEC
         local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
         hour = local_time.hour + local_time.minute / 60.0
         norm = get_diurnal_trend(hour, lat, f107)
@@ -60,7 +60,7 @@ with tab1:
         if len(st.session_state.history[city]) > 20: st.session_state.history[city].pop(0)
 
         c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
-        # Возвращены показатели со стрелками (delta)
+        # Показатель со стрелкой (delta)
         c1.metric(f"📍 {city} ({local_time.strftime('%H:%M')})", f"{val:.1f} TECU", f"{z:+.1f}σ")
 
         if abs(z) <= 1.8:
@@ -70,7 +70,7 @@ with tab1:
         c3.success("✅ Сейсмика: Спокойно")
         c4.line_chart(st.session_state.history[city], color="#00FFFF")
 
-    # Авто-обновление каждые 3 секунды
+    # Авто-обновление страницы через 3 секунды
     if time.time() - st.session_state.last_update > 3:
         st.session_state.last_update = time.time()
         st.rerun()
@@ -93,11 +93,11 @@ with tab2:
             p = f['properties']
             st.write(
                 f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d')} | **{p['mag']} M** | {p['place']}")
-    else:
-        st.write("Нажмите кнопку для поиска событий.")
+    elif st.session_state.archive_results is not None:
+        st.write("Событий не найдено.")
 
 with tab3:
     st.subheader("📊 Анализ нормы VTEC")
-    c = st.selectbox("Город:", list(CITIES.keys()))
+    c = st.selectbox("Локация:", list(CITIES.keys()))
     h = st.slider("Час UTC:", 0, 23, 12)
-    st.info(f"Расчетная норма для {c} в {h}:00 составляет **{get_diurnal_trend(h, CITIES[c][0], f107)} TECU**.")
+    st.info(f"Расчетная норма VTEC для {c} в {h}:00 составляет **{get_diurnal_trend(h, CITIES[c][0], f107)} TECU**.")
