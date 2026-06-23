@@ -52,7 +52,7 @@ def live_vtec_monitor(f107):
 
         c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
         c1.metric(f"📍 {city} ({local_time.strftime('%H:%M')})", f"{val:.1f} TECU", f"{z:+.1f}σ",
-                  help="Текущее значение")
+                  help="Текущее значение VTEC и отклонение от нормы (Z-score)")
 
         if abs(z) <= 1.8:
             c2.success("✅ VTEC в норме")
@@ -75,10 +75,12 @@ with tab1:
 
 with tab2:
     st.subheader("📂 Сейсмо-архив")
-    city_sel = st.selectbox("Выберите город:", list(CITIES.keys()), help="Город для поиска")
-    date_sel = st.date_input("Дата начала:", datetime.now() - timedelta(days=7))
+    city_sel = st.selectbox("Выберите город:", list(CITIES.keys()),
+                            help="Выберите целевой город для поиска сейсмических событий")
+    date_sel = st.date_input("Дата начала:", datetime.now() - timedelta(days=7),
+                             help="Выберите дату, начиная с которой искать землетрясения")
 
-    if st.button("📂 Загрузить данные"):
+    if st.button("📂 Загрузить данные", help="Нажмите, чтобы обновить список землетрясений из архива USGS"):
         lat, lon = CITIES[city_sel][0], CITIES[city_sel][1]
         url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={date_sel.isoformat()}&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=3.0"
         res = requests.get(url, timeout=3).json()
@@ -94,6 +96,6 @@ with tab2:
 
 with tab3:
     st.subheader("📊 Анализ нормы VTEC")
-    c = st.selectbox("Локация:", list(CITIES.keys()), help="Точка для моделирования")
-    h = st.slider("Час UTC:", 0, 23, 12, help="Ползунок для просмотра суточного хода VTEC")
+    c = st.selectbox("Локация:", list(CITIES.keys()), help="Выберите город для просмотра теоретической модели")
+    h = st.slider("Час UTC:", 0, 23, 12, help="Выберите час для моделирования суточного хода VTEC")
     st.info(f"Расчетная норма для {c} в {h}:00 составляет **{get_diurnal_trend(h, CITIES[c][0], f107)} TECU**.")
