@@ -74,17 +74,15 @@ with tab1:
         c3.success("✅ Сейсмика: Спокойно")
         c4.line_chart(st.session_state.history[city], color="#00FFFF")
 
-    time.sleep(3)  # Пауза перед обновлением
-    st.rerun()  # Автоматически обновляет Live данные
-
 with tab2:
     st.subheader("📂 Сейсмо-архив")
-    with st.form("archive_form", clear_on_submit=False):
+    with st.form("archive_form"):
         city_sel = st.selectbox("Выберите город:", list(CITIES.keys()), help="Город для поиска")
         date_sel = st.date_input("Дата начала:", datetime.now() - timedelta(days=7))
         btn = st.form_submit_button("Загрузить данные")
 
     if btn:
+        st.session_state.archive_results = None  # Очистка перед запросом
         lat, lon = CITIES[city_sel][0], CITIES[city_sel][1]
         url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={date_sel.isoformat()}&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=3.0"
         res = requests.get(url, timeout=3).json()
@@ -95,7 +93,7 @@ with tab2:
             p = f['properties']
             st.write(
                 f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d')} | **{p['mag']} M** | {p['place']}")
-    elif btn and not st.session_state.archive_results:
+    elif btn:
         st.write("Событий не найдено.")
 
 with tab3:
