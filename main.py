@@ -14,7 +14,6 @@ CITIES = {
 }
 
 if 'history' not in st.session_state: st.session_state.history = {city: [] for city in CITIES}
-if 'archive_results' not in st.session_state: st.session_state.archive_results = None
 
 
 # --- ФУНКЦИИ ---
@@ -36,6 +35,13 @@ def get_diurnal_trend(hour, lat, f107):
     return round(diurnal * (np.cos(np.radians(lat))), 1)
 
 
+@st.cache_data(ttl=600)
+def get_recent_quakes(lat, lon):
+    url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=3.0&limit=3"
+    res = requests.get(url, timeout=3).json()
+    return res.get('features', [])
+
+
 # --- ФРАГМЕНТ ДЛЯ АВТО-ОБНОВЛЕНИЯ (VTEC) ---
 @st.fragment(run_every="3s")
 def live_vtec_monitor(f107):
@@ -52,7 +58,7 @@ def live_vtec_monitor(f107):
 
         c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
         c1.metric(f"📍 {city} ({local_time.strftime('%H:%M')})", f"{val:.1f} TECU", f"{z:+.1f}σ",
-                  help="Текущее значение VTEC в TECU и отклонение (Z-score) от теоретической нормы")
+                  help="Текущее значение VTEC в TECU и отклонение (Z-score)")
 
         if abs(z) <= 1.8:
             c2.success("✅ VTEC в норме")
@@ -70,38 +76,27 @@ st.info(
     f"🌐 Kp-индекс: **{kp}** | ☀️ Поток F10.7: **{f107}** | UTC: **{datetime.now(timezone.utc).strftime('%H:%M:%S')}**",
     icon="ℹ️")
 
-tab1, tab2, tab3 = st.tabs(["🟢 Live-мониторинг", "📂 Сейсмо-архив", "📊 Анализ нормы VTEC"])
+tab1, tab2, tab3 = st.tabs(["🟢 Live-мониторинг", "🌋 Последние сейсмособытия", "📊 Анализ нормы VTEC"])
 
 with tab1:
     live_vtec_monitor(f107)
 
 with tab2:
-    st.subheader("📂 Сейсмо-архив")
-    city_sel = st.selectbox("Выберите город:", list(CITIES.keys()),
-                            help="Укажите город, для которого необходимо выполнить поиск исторических данных о землетрясениях")
-    date_sel = st.date_input("Дата начала:", datetime.now() - timedelta(days=7),
-                             help="Выберите дату, начиная с которой API USGS будет искать сейсмическую активность")
-
-    if st.button("📂 Загрузить данные",
-                 help="Нажмите для отправки запроса к USGS Earthquakes API и получения списка событий"):
-        lat, lon = CITIES[city_sel][0], CITIES[city_sel][1]
-        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={date_sel.isoformat()}&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=3.0"
-        res = requests.get(url, timeout=3).json()
-        st.session_state.archive_results = res.get('features', [])
-
-    if st.session_state.archive_results:
-        for f in st.session_state.archive_results[:5]:
-            p = f['properties']
-            st.write(
-                f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d')} | **{p['mag']} M** | {p['place']}")
-    elif st.session_state.archive_results is not None:
-        st.write("Событий не найдено.")
+    st.subheader("🌋 Свежая сейсмо-лента (USGS)")
+    for city, (lat, lon, _) in CITIES.items():
+        st.markdown(f"**{city} (Радиус 500км):**")
+        quakes = get_recent_quakes(lat, lon)
+        if quakes:
+            for q in quakes:
+                p = q['properties']
+                st.write(
+                    f"- {datetime.fromtimestamp(p['time'] / 1000).strftime('%H:%M %d.%m')} | **{p['mag']} M** | {p['place']}")
+        else:
+            st.write("Событий 3.0+ M не зафиксировано.")
 
 with tab3:
     st.subheader("📊 Анализ нормы VTEC")
-    c = st.selectbox("Локация:", list(CITIES.keys()),
-                     help="Город, для которого рассчитывается ожидаемое фоновое значение VTEC")
-    h = st.slider("Час UTC:", 0, 23, 12,
-                  help="Выберите час, чтобы увидеть прогнозное значение ионизации атмосферы на основе текущего потока F10.7")
+    c = st.selectbox("Локация:", list(CITIES.keys()), help="Выберите город для просмотра теоретической модели")
+    h = st.slider("Час UTC:", 0, 23, 12, help="Выберите час для моделирования суточного хода VTEC")
     st.info(f"Расчетная норма для {c} в {h}:00 составляет **{get_diurnal_trend(h, CITIES[c][0], f107)} TECU**.",
             icon="💡")
