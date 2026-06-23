@@ -58,7 +58,7 @@ def live_vtec_monitor(f107):
 
         c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
         c1.metric(f"📍 {city} ({local_time.strftime('%H:%M')})", f"{val:.1f} TECU", f"{z:+.1f}σ",
-                  help="Текущее значение VTEC в TECU и отклонение (Z-score)")
+                  help="Текущий уровень электронной концентрации и отклонение от суточной нормы (Z-score)")
 
         if abs(z) <= 1.8:
             c2.success("✅ VTEC в норме")
@@ -76,15 +76,16 @@ st.info(
     f"🌐 Kp-индекс: **{kp}** | ☀️ Поток F10.7: **{f107}** | UTC: **{datetime.now(timezone.utc).strftime('%H:%M:%S')}**",
     icon="ℹ️")
 
-tab1, tab2, tab3 = st.tabs(["🟢 Live-мониторинг", "🌋 Последние сейсмособытия", "📊 Анализ нормы VTEC"])
+tab1, tab2, tab3 = st.tabs(["🟢 Live-мониторинг", "🌋 Сейсмо-лента", "📊 Анализ нормы VTEC"])
 
 with tab1:
     live_vtec_monitor(f107)
 
 with tab2:
     st.subheader("🌋 Свежая сейсмо-лента (USGS)")
+    st.caption("Автоматически обновляемый список последних событий магнитудой 3.0+ в радиусе 500 км.")
     for city, (lat, lon, _) in CITIES.items():
-        st.markdown(f"**{city} (Радиус 500км):**")
+        st.markdown(f"**{city}:**")
         quakes = get_recent_quakes(lat, lon)
         if quakes:
             for q in quakes:
@@ -96,7 +97,9 @@ with tab2:
 
 with tab3:
     st.subheader("📊 Анализ нормы VTEC")
-    c = st.selectbox("Локация:", list(CITIES.keys()), help="Выберите город для просмотра теоретической модели")
-    h = st.slider("Час UTC:", 0, 23, 12, help="Выберите час для моделирования суточного хода VTEC")
+    c = st.selectbox("Выберите локацию:", list(CITIES.keys()),
+                     help="Выберите город для расчета ожидаемого фонового состояния ионосферы")
+    h = st.slider("Установите час (UTC):", 0, 23, 12,
+                  help="Перемещайте ползунок для анализа суточного изменения VTEC в зависимости от солнечного потока F10.7")
     st.info(f"Расчетная норма для {c} в {h}:00 составляет **{get_diurnal_trend(h, CITIES[c][0], f107)} TECU**.",
             icon="💡")
