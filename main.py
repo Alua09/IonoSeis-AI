@@ -41,20 +41,28 @@ def get_diurnal_trend(hour, lat, f107):
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
 kp, f107 = get_space_weather_data()
+st.info(
+    f"🌐 Kp: **{kp}** | ☀️ F10.7: **{f107}** | Локальное время (UTC): **{datetime.now(timezone.utc).strftime('%H:%M:%S')}**")
+
 tab1, tab2, tab3 = st.tabs(["🟢 Live-мониторинг", "📂 Сейсмо-архив", "📊 Анализ нормы VTEC"])
 
 with tab1:
     for city, (lat, lon, offset) in CITIES.items():
         st.markdown("---")
-        hour = (datetime.now(timezone.utc) + timedelta(hours=offset)).hour
-        val = get_diurnal_trend(hour, lat, f107) + np.random.normal(0, 0.4)
-        z = (val - get_diurnal_trend(hour, lat, f107)) / 1.5
+        # Расчет данных
+        local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
+        hour = local_time.hour + local_time.minute / 60.0
+        norm = get_diurnal_trend(hour, lat, f107)
+        val = norm + np.random.normal(0, 0.4)
+        z = (val - norm) / 1.5
 
         st.session_state.history[city].append(val)
         if len(st.session_state.history[city]) > 20: st.session_state.history[city].pop(0)
 
         c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
-        c1.metric(f"📍 {city}", f"{val:.1f} TECU")
+        # Возвращены показатели со стрелками (delta)
+        c1.metric(f"📍 {city} ({local_time.strftime('%H:%M')})", f"{val:.1f} TECU", f"{z:+.1f}σ")
+
         if abs(z) <= 1.8:
             c2.success("✅ VTEC в норме")
         else:
@@ -62,8 +70,8 @@ with tab1:
         c3.success("✅ Сейсмика: Спокойно")
         c4.line_chart(st.session_state.history[city], color="#00FFFF")
 
-    # Авто-обновление страницы каждые 5 секунд без блокировки интерфейса
-    if time.time() - st.session_state.last_update > 5:
+    # Авто-обновление каждые 3 секунды
+    if time.time() - st.session_state.last_update > 3:
         st.session_state.last_update = time.time()
         st.rerun()
 
@@ -76,7 +84,6 @@ with tab2:
 
     if btn:
         lat, lon = CITIES[city_sel][0], CITIES[city_sel][1]
-        # Фильтр дат: от выбранной даты до текущего момента
         url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={date_sel.isoformat()}&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=3.0"
         res = requests.get(url, timeout=3).json()
         st.session_state.archive_results = res.get('features', [])
@@ -84,10 +91,13 @@ with tab2:
     if st.session_state.archive_results:
         for f in st.session_state.archive_results[:5]:
             p = f['properties']
-            st.write(f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d')} | {p['mag']} M | {p['place']}")
+            st.write(
+                f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%Y-%m-%d')} | **{p['mag']} M** | {p['place']}")
+    else:
+        st.write("Нажмите кнопку для поиска событий.")
 
 with tab3:
     st.subheader("📊 Анализ нормы VTEC")
     c = st.selectbox("Город:", list(CITIES.keys()))
     h = st.slider("Час UTC:", 0, 23, 12)
-    st.info(f"Норма: **{get_diurnal_trend(h, CITIES[c][0], f107)} TECU**.")
+    st.info(f"Расчетная норма для {c} в {h}:00 составляет **{get_diurnal_trend(h, CITIES[c][0], f107)} TECU**.")
