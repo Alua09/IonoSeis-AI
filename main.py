@@ -60,16 +60,13 @@ def live_vtec_monitor(f107):
         c1.metric(f"📍 {city} ({local_time.strftime('%H:%M')})", f"{val:.1f} TECU", f"{z:+.1f}σ",
                   help="Текущее значение VTEC в TECU и отклонение (Z-score) от теоретической нормы")
 
-        # Добавлены help-подсказки к статусным блокам
+        # Исправлено: help убран из success/error
         if abs(z) <= 1.8:
-            c2.success("✅ VTEC в норме", icon="ℹ️",
-                       help="Значение Z-score находится в допустимом диапазоне (≤ 1.8), ионосфера стабильна.")
+            c2.success("✅ VTEC в норме (Z ≤ 1.8)", icon="ℹ️")
         else:
-            c2.error(f"⚠️ Аномалия Z={z:.1f}", icon="⚠️",
-                     help=f"Обнаружено отклонение {z:.1f}σ. Возможна ионосферная аномалия.")
+            c2.error(f"⚠️ Аномалия Z={z:.1f} (> 1.8)", icon="⚠️")
 
-        c3.success("✅ Сейсмика: Спокойно", icon="ℹ️",
-                   help="В радиусе 500 км не зафиксировано критических сейсмических событий 3.0+ M в последние часы.")
+        c3.success("✅ Сейсмика: Спокойно", icon="ℹ️")
 
         c4.line_chart(st.session_state.history[city], color="#00FFFF")
 
@@ -77,7 +74,6 @@ def live_vtec_monitor(f107):
 # --- ИНТЕРФЕЙС ---
 st.title("🛰 IonoSeis AI: Экспертный мониторинг")
 
-# Методология мониторинга
 with st.expander("ℹ️ Методология мониторинга и анализа данных", expanded=False):
     st.markdown("""
     * **VTEC (Total Electron Content):** Анализ вариаций плотности электронов. Z-score > 1.8 сигнализирует об аномалии.
