@@ -1,6 +1,7 @@
 import streamlit as st
 import numpy as np
 import requests
+import plotly.express as px
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
@@ -53,7 +54,7 @@ def get_recent_quakes(lat, lon):
         return []
 
 
-# --- ФРАГМЕНТ МОНИТОРИНГА ---
+# --- ФРАГМЕНТ МОНИТОРИНГА (С ФИКСИРОВАННЫМИ ГРАФИКАМИ PLOTLY) ---
 @st.fragment(run_every="3s")
 def live_vtec_monitor(f107):
     for city, (lat, lon, offset) in CITIES.items():
@@ -77,107 +78,65 @@ def live_vtec_monitor(f107):
             st.subheader(f"📍 {city}")
             c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
 
-            c1.metric("Текущий VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ",
-                      help="Z-score > 1.8 показывает, что текущее состояние ионосферы сильно отклоняется от математической модели нормы.")
-
+            c1.metric("Текущий VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ", help="Z-score > 1.8 — аномалия.")
             if abs(z) <= 1.8:
                 c2.info("**СТАТУС: НОРМА**", icon="✅")
             else:
                 c2.error("**СТАТУС: АНОМАЛИЯ**", icon="🚨")
-
             c3.info("**СЕЙСМИКА: OK**", icon="🛡️")
 
-            st.caption("График: Относительное изменение VTEC (отклонение от среднего)")
+            # Фиксированный график через Plotly
             city_mean = np.mean(st.session_state.history[city]) if st.session_state.history[city] else 1.0
             variation_data = [(v / city_mean) if city_mean != 0 else 0 for v in st.session_state.history[city]]
-            c4.line_chart(variation_data, color="#7FFFD4", height=80, use_container_width=True)
+            fig = px.line(y=variation_data, range_y=[0.8, 1.2])
+            fig.update_layout(height=60, margin=dict(l=0, r=0, t=0, b=0), showlegend=False,
+                              plot_bgcolor='rgba(0,0,0,0)')
+            fig.update_traces(line_color='#7FFFD4')
+            c4.plotly_chart(fig, use_container_width=True)
 
 
 # --- ИНТЕРФЕЙС ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2554/2554042.png", width=80)
     st.title("🛡️ System Control")
-    st.success("🤖 AI Engine: Active")
-    st.success("📡 Ionosphere API: Connected")
-    st.success("🌍 USGS Seismic: Online")
-    st.divider()
     if st.button("🗑️ Очистить журнал аномалий"):
         st.session_state.alerts = []
         st.rerun()
 
 st.title("🛰️ IonoSeis AI: Система прогнозирования")
-st.caption("Экспертная панель анализа ионосферных предвестников")
-
 kp, f107 = get_space_weather_data()
-
 col1, col2, col3 = st.columns(3)
-col1.metric("Геомагнитный Kp-индекс", kp,
-            help="Если Kp > 4, значит идут магнитные бури, которые влияют на ионосферу независимо от землетрясений.")
-col2.metric("Солнечный поток F10.7", f107,
-            help="Базовый показатель солнечной активности: чем он выше, тем плотнее ионосфера.")
-col3.metric("Время UTC", datetime.now(timezone.utc).strftime('%H:%M:%S'),
-            help="Время для синхронизации данных с мировыми сейсмостанциями.")
+col1.metric("Геомагнитный Kp-индекс", kp)
+col2.metric("Солнечный поток F10.7", f107)
+col3.metric("Время UTC", datetime.now(timezone.utc).strftime('%H:%M:%S'))
 
 tab1, tab2, tab3, tab4 = st.tabs(["🟢 МОНИТОРИНГ", "🚨 ЖУРНАЛ АНОМАЛИЙ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 МЕТОДОЛОГИЯ"])
 
-with tab1:
-    live_vtec_monitor(f107)
-
+with tab1: live_vtec_monitor(f107)
 with tab2:
     if st.session_state.alerts:
-        for alert in reversed(st.session_state.alerts):
-            with st.expander(f"🔴 {alert['time']} | {alert['city']} | Z={alert['val']}σ"):
-                st.write(
-                    f"**Анализ:** {alert['msg']}. Рекомендуем проверить Kp-индекс — если он низкий, это может быть сигналом тектонической активности.")
+        for alert in reversed(st.session_state.alerts): st.expander(
+            f"🔴 {alert['time']} | {alert['city']} | Z={alert['val']}σ").write(f"**Анализ:** {alert['msg']}")
     else:
-        st.info("Аномалий за текущую сессию не зафиксировано.")
+        st.info("Аномалий нет.")
 
 with tab3:
     for city, (lat, lon, _) in CITIES.items():
-        st.markdown(f"### Регион: {city}")
+        st.markdown(f"### {city}")
         quakes = get_recent_quakes(lat, lon)
-        if quakes:
-            for q in quakes:
-                p = q['properties']
-                st.write(
-                    f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%d.%m %H:%M')} | **{p['mag']} M** | {p['place']}")
-        else:
-            st.write("Сейсмическая активность в радиусе 500 км в норме.")
+        for q in quakes: st.write(f"📅 {q['properties']['mag']} M | {q['properties']['place']}")
 
 with tab4:
     st.subheader("🧪 Научно-методологическая база")
-
-    # Визуальное представление процессов
     st.markdown("— *Схема взаимодействия литосферы и ионосферы:*")
 
     st.markdown("""
-    Наша система работает на базе теории **литосферно-ионосферного взаимодействия (LIS)**. Если говорить просто: Земля — это не просто камень под нашими ногами, а сложная система, где процессы в глубине коры могут «отзываться» даже в космосе.
-
-    **1. Как это работает?**
-    Когда в земной коре из-за движения тектонических плит начинает расти напряжение, происходят микродеформации. Это приводит к выбросу газов (например, радона) и появлению слабых электрических полей. Эти возмущения «долетают» до ионосферы — слоя атмосферы, насыщенного заряженными частицами (плазмой), — и меняют её плотность.
-
-    **2. Математический метод: поиск аномалий**
-    Чтобы понять, что ионосфера «волнуется» именно из-за тектонических процессов, а не из-за обычной погоды или Солнца, мы используем **Z-оценку**. Мы вычисляем, насколько текущее состояние ионосферы (VTEC) отличается от «нормы» для этого времени суток.
-
-    **Формула аномалии:**
+    Наша система работает на базе теории **литосферно-ионосферного взаимодействия (LIS)**. 
+    Когда в коре растет напряжение, возникают микродеформации, выбросы газов и электрические поля, влияющие на плотность ионосферы.
     """)
     st.latex(r"Z = \frac{VTEC_{obs} - VTEC_{norm}}{\sigma}")
+    st.markdown("— *Анализ аномалий:*")
+
     st.markdown("""
-    * $VTEC_{obs}$ — то, что мы видим в данный момент.
-    * $VTEC_{norm}$ — «нормальное» состояние, рассчитанное нашей моделью.
-    * $\sigma$ — статистическая погрешность (шум).
-
-    — *Графическое представление анализа VTEC:*
-
-
-    **3. Фильтр помех (как не принять магнитную бурю за землетрясение)**
-    Ионосфера очень капризна: на неё сильно влияет Солнце. Чтобы не ошибиться, система применяет фильтры:
-    * **Контроль Kp-индекса:** Kp — это показатель геомагнитных бурь. Если Kp-индекс выше 4, значит, ионосферу «трясёт» от солнечного ветра, а не от тектоники. Мы помечаем такие данные как недостоверные для прогноза землетрясений.
-    * **Анализ радиуса:** Мы проверяем только те события, которые происходят в радиусе 500 км от региона.
-    * **Синхронизация с USGS:** Мы сопоставляем наши «космические» сигналы с реальными данными о землетрясениях, чтобы понять, насколько точно ионосфера «предупреждала» об ударе.
-
-    — *Мониторинговая сеть сейсмических станций:*
-
-
-    Этот комплексный подход позволяет нам отделить естественные «шумы» планеты от реальных предвестников сейсмической активности.
+    Мы используем Z-оценку и фильтры Kp-индекса, чтобы исключить влияние солнечных бурь и отделить тектонический сигнал от «шума».
     """)
