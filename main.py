@@ -6,6 +6,13 @@ from datetime import datetime, timezone, timedelta
 # --- КОНФИГУРАЦИЯ ---
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Dashboard", page_icon="🛰️")
 
+# --- СТИЛИЗАЦИЯ ---
+st.markdown("""
+    <style>
+    .stMetric { background-color: #f8f9fb; padding: 15px; border-radius: 10px; border: 1px solid #e6e9ef; }
+    </style>
+""", unsafe_allow_html=True)
+
 # Инициализация хранилища
 if 'alerts' not in st.session_state: st.session_state.alerts = []
 if 'history' not in st.session_state: st.session_state.history = {city: [] for city in ["Алматы", "Бишкек", "Токио"]}
@@ -79,11 +86,15 @@ def live_vtec_monitor(f107):
                 c2.error("**СТАТУС: АНОМАЛИЯ**", icon="🚨")
 
             c3.info("**СЕЙСМИКА: OK**", icon="🛡️")
-            c4.line_chart(st.session_state.history[city], color="#00FFFF", height=80)
+
+            # Обновленный график
+            st.caption("График: Относительное изменение VTEC (отклонение от среднего)")
+            city_mean = np.mean(st.session_state.history[city]) if st.session_state.history[city] else 1.0
+            variation_data = [(v / city_mean) if city_mean != 0 else 0 for v in st.session_state.history[city]]
+            c4.line_chart(variation_data, color="#7FFFD4", height=80, use_container_width=True)
 
 
 # --- ИНТЕРФЕЙС ---
-
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2554/2554042.png", width=80)
     st.title("🛡️ System Control")
@@ -108,7 +119,7 @@ col2.metric("Солнечный поток F10.7", f107,
 col3.metric("Время UTC", datetime.now(timezone.utc).strftime('%H:%M:%S'),
             help="Время для синхронизации данных с мировыми сейсмостанциями.")
 
-tab1, tab2, tab3, tab4 = st.tabs(["🟢 МОНИТОРИНГ", "🚨 ЖУРНАЛ АНОМАЛИЙ", "🌋 СЕЙСМО-ЛЕНТА", "📊 МЕТОДОЛОГИЯ"])
+tab1, tab2, tab3, tab4 = st.tabs(["🟢 МОНИТОРИНГ", "🚨 ЖУРНАЛ АНОМАЛИЙ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 МЕТОДОЛОГИЯ"])
 
 with tab1:
     live_vtec_monitor(f107)
