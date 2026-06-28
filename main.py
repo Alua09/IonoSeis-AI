@@ -146,7 +146,7 @@ with tab3:
                 time_str = datetime.fromtimestamp(p['time'] / 1000).strftime('%d.%m %H:%M')
 
                 # Логика выделения: если маг > 6.0, используем красный цвет и жирный шрифт
-                if mag >= 6.0:
+                if mag >= 5.0:
                     st.markdown(f"🚨 **📅 {time_str} | ⚠️ {mag} M | {p['place']}**")
                 else:
                     st.write(f"📅 {time_str} | {mag} M | {p['place']}")
