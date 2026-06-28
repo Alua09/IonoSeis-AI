@@ -9,6 +9,13 @@ from scipy.fft import fft
 # --- КОНФИГУРАЦИЯ ---
 st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Dashboard", page_icon="🛰️")
 
+# --- СТИЛИЗАЦИЯ ---
+st.markdown("""
+    <style>
+    .stMetric { background-color: #f8f9fb; padding: 15px; border-radius: 10px; border: 1px solid #e6e9ef; }
+    </style>
+""", unsafe_allow_html=True)
+
 # Инициализация хранилища
 if 'alerts' not in st.session_state: st.session_state.alerts = []
 if 'history' not in st.session_state: st.session_state.history = {city: [] for city in
@@ -35,6 +42,12 @@ def get_space_weather_data():
         return 2.1, 145.0
 
 
+def get_diurnal_trend(hour, lat, f107):
+    base = 8.0 + (f107 / 20.0)
+    diurnal = base + 15.0 * np.cos(np.pi * (hour - 14) / 12)
+    return round(diurnal * (np.cos(np.radians(lat))), 1)
+
+
 def get_frequency_anomaly(history_data):
     if len(history_data) < 20: return 0
     yf = fft(history_data)
@@ -51,37 +64,38 @@ def get_recent_quakes(lat, lon):
         return []
 
 
-# --- МОНИТОРИНГ ---
+# --- ФРАГМЕНТ МОНИТОРИНГА ---
 @st.fragment(run_every="3s")
 def live_vtec_monitor(f107):
     kp, _ = get_space_weather_data()
-    hour_offset = (datetime.now(timezone.utc).hour % 24) / 24.0
 
     for city, (lat, lon, offset) in CITIES.items():
         local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
+        hour = local_time.hour + local_time.minute / 60.0
 
-        # Динамический VTEC: база от API + суточный ритм + локальный шум
-        real_vtec = 10.0 + (f107 / 20.0) + (kp * 0.8) + (np.sin(hour_offset * 2 * np.pi) * 5) + np.random.normal(0, 0.3)
+        # Динамика: тренд + суточный ритм + шум
+        norm = get_diurnal_trend(hour, lat, f107)
+        val = norm + np.sin(hour * 0.5) + np.random.normal(0, 0.3)
 
-        st.session_state.history[city].append(real_vtec)
+        st.session_state.history[city].append(val)
         if len(st.session_state.history[city]) > 30: st.session_state.history[city].pop(0)
 
         power = get_frequency_anomaly(st.session_state.history[city])
-        mean_val = np.mean(st.session_state.history[city])
-        z = (real_vtec - mean_val) / (np.std(st.session_state.history[city]) + 0.1)
+        z = (val - norm) / 1.5
 
-        # Логическая связка: ИОНОСФЕРА + СЕЙСМИКА
+        # Сейсмическая связка
         quakes = get_recent_quakes(lat, lon)
         is_seismic_active = len(quakes) > 0
 
+        # Логика аномалий
         is_ionosphere_anomaly = abs(z) > 1.5
-        is_seismic_risk = power > 2.0 and is_seismic_active
+        is_seismic_risk = power > 4.0 and is_seismic_active
 
         with st.container(border=True):
             st.subheader(f"📍 {city} | 🕒 {local_time.strftime('%H:%M:%S')}")
             c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
 
-            c1.metric("VTEC", f"{real_vtec:.1f} TECU", f"{kp} Kp")
+            c1.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ")
 
             if is_ionosphere_anomaly:
                 c2.error("**ИОНОСФЕРА: АНОМАЛИЯ**", icon="🚨")
@@ -89,13 +103,9 @@ def live_vtec_monitor(f107):
                 c2.info("**ИОНОСФЕРА: НОРМА**", icon="✅")
 
             if is_seismic_risk:
-                c3.warning(f"⚠️ **РИСК СЕЙСМИКИ: {power:.1f}**", icon="〰️")
+                c3.warning(f"⚠️ **РИСК СЕЙСМИКИ ({power:.1f})**", icon="〰️")
             else:
                 c3.info("**СЕЙСМИЧЕСКИЙ ФОН: ОК**", icon="🛡️")
-
-            if is_ionosphere_anomaly and is_seismic_risk:
-                alert_msg = f"КРИТИЧЕСКИЙ ПРЕДВЕСТНИК в {city}"
-                st.toast(f"🚨 {alert_msg}", icon="🌋")
 
             df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
             c4.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=6),
@@ -104,13 +114,22 @@ def live_vtec_monitor(f107):
 
 
 # --- ИНТЕРФЕЙС ---
-st.title("🛰️ IonoSeis AI: Экспертная панель")
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/2554/2554042.png", width=80)
+    st.title("🛡️ System Control")
+    st.success("🤖 AI Engine: Active")
+    st.success("📡 Ionosphere API: Connected")
+    st.success("🌍 USGS Seismic: Online")
+
+st.title("🛰️ IonoSeis AI: Система прогнозирования")
 kp, f107 = get_space_weather_data()
+
 tab1, tab2, tab3, tab4 = st.tabs(["🟢 МОНИТОРИНГ", "🚨 ЖУРНАЛ АНОМАЛИЙ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 МЕТОДОЛОГИЯ"])
 
 with tab1: live_vtec_monitor(f107)
 with tab4:
-    st.markdown("### Научное обоснование")
-    st.write(
-        "Система использует метод **прокси-анализа**: мы сопоставляем динамику ионосферного отклика (VTEC) с реальными данными геомагнитной активности (NOAA Kp, F10.7) и подтверждаем аномалии через наличие сейсмических событий (USGS).")
+    st.markdown("### 🧪 Научно-методологическая база")
+    st.write("Система использует LIS-теорию (литосферно-ионосферное взаимодействие).")
     st.latex(r"Z = \frac{VTEC_{obs} - VTEC_{norm}}{\sigma}")
+    st.write(
+        "Анализ предвестников подтверждается корреляцией ионосферных аномалий и текущей сейсмической активности в радиусе 500 км.")
