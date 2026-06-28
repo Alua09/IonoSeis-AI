@@ -102,11 +102,12 @@ def live_vtec_monitor(f107):
             else:
                 c2.error("**СТАТУС: АНОМАЛИЯ**", icon="🚨")
 
-            if power > 5.0:
-                c3.warning(f"⚠️ SPECTRAL ANOMALY: {power:.1f}", icon="〰️",
-                           help="Анализ частот (FFT) выявляет скрытые низкочастотные резонансы, характерные для предвестников землетрясений.")
-            else:
-                c3.info("**СЕЙСМИКА: OK**", icon="🛡️")
+            with c3:
+                if power > 5.0:
+                    st.warning(f"⚠️ SPECTRAL ANOMALY: {power:.1f}", icon="〰️")
+                    st.caption("Анализ частот (FFT) выявляет скрытые низкочастотные резонансы, характерные для предвестников землетрясений.")
+                else:
+                    st.info("**СЕЙСМИКА: OK**", icon="🛡️")
 
             # Карта региона
             df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
