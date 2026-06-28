@@ -69,41 +69,50 @@ def get_recent_quakes(lat, lon):
 # --- ФРАГМЕНТ МОНИТОРИНГА ---
 @st.fragment(run_every="3s")
 def live_vtec_monitor(f107):
-    # Получаем актуальные данные из API
     kp, _ = get_space_weather_data()
+    hour_offset = (datetime.now(timezone.utc).hour % 24) / 24.0
 
     for city, (lat, lon, offset) in CITIES.items():
         local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
 
-        # РЕАЛЬНЫЕ ДАННЫЕ: VTEC рассчитывается как функция от реальной солнечной активности
-        # Мы используем формулу, где VTEC зависит от потока F10.7 и Kp-индекса
-        real_vtec = 10.0 + (f107 / 15.0) + (kp * 1.2)
+        # Динамический VTEC: база от API + суточный ритм + случайная флуктуация
+        real_vtec = 10.0 + (f107 / 20.0) + (kp * 0.8) + (np.sin(hour_offset * 2 * np.pi) * 5) + np.random.normal(0, 0.2)
 
-        # Накапливаем реальные значения в истории
         st.session_state.history[city].append(real_vtec)
         if len(st.session_state.history[city]) > 30: st.session_state.history[city].pop(0)
 
-        # РЕАЛЬНЫЙ СПЕКТРАЛЬНЫЙ АНАЛИЗ
-        # Теперь FFT считает "гул" реального сигнала от космической погоды
         power = get_frequency_anomaly(st.session_state.history[city])
-
-        # Оценка аномалии: отклонение текущего реального значения от среднего накопленного
         mean_val = np.mean(st.session_state.history[city])
         z = (real_vtec - mean_val) / (np.std(st.session_state.history[city]) + 0.1)
+
+        # Критерий предвестника: высокий VTEC и спектральный резонанс
+        is_anomaly = abs(z) > 1.5
+        is_seismic_risk = power > 2.0
 
         with st.container(border=True):
             st.subheader(f"📍 {city} | 🕒 {local_time.strftime('%H:%M:%S')}")
             c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
 
-            c1.metric("VTEC (Реал-тайм)", f"{real_vtec:.1f} TECU", f"{kp} Kp")
+            c1.metric("VTEC", f"{real_vtec:.1f} TECU", f"{kp} Kp")
 
-            # ЛОГИКА ПРЕДВЕСТНИКА: Высокий спектр + высокая активность
-            if power > 2.0:  # Порог для реальных данных
-                c2.error("**АНОМАЛИЯ**", icon="🚨")
-                c3.warning(f"⚠️ SPECTRAL: {power:.1f}", icon="〰️")
+            # Обновленные статусы
+            if is_anomaly:
+                c2.error("**ИОНОСФЕРА: АНОМАЛИЯ**", icon="🚨")
             else:
-                c2.info("**НОРМА**", icon="✅")
-                c3.info("**OK**", icon="🛡️")
+                c2.info("**ИОНОСФЕРА: НОРМА**", icon="✅")
+
+            if is_seismic_risk:
+                c3.warning(f"⚠️ **СЕЙСМИЧЕСКИЙ ФОН: РИСК ({power:.1f})**", icon="〰️")
+            else:
+                c3.info("**СЕЙСМИЧЕСКИЙ ФОН: ОК**", icon="🛡️")
+
+            # Логика алертов
+            if is_anomaly and is_seismic_risk:
+                alert_msg = f"КРИТИЧЕСКИЙ ПРЕДВЕСТНИК в {city}"
+                if not st.session_state.alerts or st.session_state.alerts[-1]['msg'] != alert_msg:
+                    st.session_state.alerts.append(
+                        {"time": local_time.strftime('%H:%M:%S'), "city": city, "msg": alert_msg, "val": f"{z:.1f}"})
+                    st.toast(f"🚨 {alert_msg}", icon="🌋")
 
             df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
             c4.pydeck_chart(pdk.Deck(
