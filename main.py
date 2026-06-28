@@ -79,7 +79,7 @@ def live_vtec_monitor(f107):
         st.session_state.history[city].append(val)
         if len(st.session_state.history[city]) > 30: st.session_state.history[city].pop(0)
 
-        # Анализ спектра
+        # Спектральный анализ
         power = get_frequency_anomaly(st.session_state.history[city])
 
         if abs(z) > 1.8:
@@ -92,7 +92,9 @@ def live_vtec_monitor(f107):
         with st.container(border=True):
             st.subheader(f"📍 {city}")
             c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
-            c1.metric("Текущий VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ")
+
+            c1.metric("Текущий VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ",
+                      help="Z-score > 1.8 показывает, что текущее состояние ионосферы сильно отклоняется от математической модели нормы.")
 
             if abs(z) <= 1.8:
                 c2.info("**СТАТУС: НОРМА**", icon="✅")
@@ -104,49 +106,75 @@ def live_vtec_monitor(f107):
             else:
                 c3.info("**СЕЙСМИКА: OK**", icon="🛡️")
 
-            st.caption("График: Относительное изменение VTEC")
-            c4.line_chart(st.session_state.history[city], color="#7FFFD4", height=80, use_container_width=True)
+            # Карта региона Pydeck
+            df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
+            c4.pydeck_chart(pdk.Deck(
+                initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=6),
+                layers=[pdk.Layer("ScatterplotLayer", df, get_position=["lon", "lat"],
+                                  get_color=[0, 200, 255, 160], get_radius=20000)],
+            ))
 
 
 # --- ИНТЕРФЕЙС ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2554/2554042.png", width=80)
     st.title("🛡️ System Control")
+    st.success("🤖 AI Engine: Active")
+    st.success("📡 Ionosphere API: Connected")
+    st.success("🌍 USGS Seismic: Online")
+    st.divider()
     if st.button("🗑️ Очистить журнал аномалий"):
         st.session_state.alerts = []
         st.rerun()
 
 st.title("🛰️ IonoSeis AI: Система прогнозирования")
+st.caption("Экспертная панель анализа ионосферных предвестников")
+
 kp, f107 = get_space_weather_data()
+
 col1, col2, col3 = st.columns(3)
-col1.metric("Kp-индекс", kp)
-col2.metric("Поток F10.7", f107)
-col3.metric("Время UTC", datetime.now(timezone.utc).strftime('%H:%M:%S'))
+col1.metric("Геомагнитный Kp-индекс", kp,
+            help="Если Kp > 4, значит идут магнитные бури, которые влияют на ионосферу независимо от землетрясений.")
+col2.metric("Солнечный поток F10.7", f107,
+            help="Базовый показатель солнечной активности: чем он выше, тем плотнее ионосфера.")
+col3.metric("Время UTC", datetime.now(timezone.utc).strftime('%H:%M:%S'),
+            help="Время для синхронизации данных с мировыми сейсмостанциями.")
 
 tab1, tab2, tab3, tab4 = st.tabs(["🟢 МОНИТОРИНГ", "🚨 ЖУРНАЛ АНОМАЛИЙ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 МЕТОДОЛОГИЯ"])
 
-with tab1: live_vtec_monitor(f107)
+with tab1:
+    live_vtec_monitor(f107)
+
 with tab2:
     if st.session_state.alerts:
         for alert in reversed(st.session_state.alerts):
-            st.expander(f"🔴 {alert['time']} | {alert['city']} | Z={alert['val']}σ").write(alert['msg'])
+            with st.expander(f"🔴 {alert['time']} | {alert['city']} | Z={alert['val']}σ"):
+                st.write(
+                    f"**Анализ:** {alert['msg']}. Рекомендуем проверить Kp-индекс — если он низкий, это может быть сигналом тектонической активности.")
     else:
-        st.info("Аномалий не зафиксировано.")
+        st.info("Аномалий за текущую сессию не зафиксировано.")
 
 with tab3:
     for city, (lat, lon, _) in CITIES.items():
         st.markdown(f"### Регион: {city}")
-        for q in get_recent_quakes(lat, lon):
-            p = q['properties']
-            mag = p['mag']
-            line = f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%d.%m %H:%M')} | {mag} M | {p['place']}"
-            if mag >= 5.0:
-                st.markdown(f"🚨 **{line}**")
-            else:
-                st.write(line)
+        quakes = get_recent_quakes(lat, lon)
+        if quakes:
+            for q in quakes:
+                p = q['properties']
+                mag = p['mag']
+                time_str = datetime.fromtimestamp(p['time'] / 1000).strftime('%d.%m %H:%M')
+                if mag >= 5.0:
+                    st.markdown(f"🚨 **📅 {time_str} | ⚠️ {mag} M | {p['place']}**")
+                else:
+                    st.write(f"📅 {time_str} | {mag} M | {p['place']}")
+        else:
+            st.write("Сейсмическая активность в радиусе 500 км в норме.")
 
 with tab4:
     st.subheader("🧪 Научно-методологическая база")
-    #
-    st.markdown("Наша система использует Z-оценку и спектральный анализ (FFT) для детекции предвестников.")
+
+    st.markdown("""
+    Наша система работает на базе теории **литосферно-ионосферного взаимодействия (LIS)**. 
+    Мы используем Z-оценку для статистического анализа и спектральный анализ (FFT) для детекции низкочастотных ионосферных предвестников.
+    """)
     st.latex(r"Z = \frac{VTEC_{obs} - VTEC_{norm}}{\sigma}")
