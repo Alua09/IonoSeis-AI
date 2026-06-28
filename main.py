@@ -142,8 +142,14 @@ with tab3:
         if quakes:
             for q in quakes:
                 p = q['properties']
-                st.write(
-                    f"📅 {datetime.fromtimestamp(p['time'] / 1000).strftime('%d.%m %H:%M')} | **{p['mag']} M** | {p['place']}")
+                mag = p['mag']
+                time_str = datetime.fromtimestamp(p['time'] / 1000).strftime('%d.%m %H:%M')
+
+                # Логика выделения: если маг > 6.0, используем красный цвет и жирный шрифт
+                if mag >= 6.0:
+                    st.markdown(f"🚨 **📅 {time_str} | ⚠️ {mag} M | {p['place']}**")
+                else:
+                    st.write(f"📅 {time_str} | {mag} M | {p['place']}")
         else:
             st.write("Сейсмическая активность в радиусе 500 км в норме.")
 
