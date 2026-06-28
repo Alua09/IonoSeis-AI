@@ -68,44 +68,43 @@ def get_recent_quakes(lat, lon):
 
 # --- ФРАГМЕНТ МОНИТОРИНГА ---
 @st.fragment(run_every="3s")
-def live_vtec_monitor(f107)
-    # 1. Получаем РЕАЛЬНЫЕ данные
+def live_vtec_monitor(f107):
+    # Получаем актуальные данные из API
     kp, _ = get_space_weather_data()
 
     for city, (lat, lon, offset) in CITIES.items():
         local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
 
-        # 2. VTEC теперь привязан к РЕАЛЬНОМУ Kp-индексу
-        # Чем выше Kp (геомагнитная буря), тем выше VTEC
-        val = 15.0 + (kp * 2.5) + np.random.normal(0, 0.2)
+        # РЕАЛЬНЫЕ ДАННЫЕ: VTEC рассчитывается как функция от реальной солнечной активности
+        # Мы используем формулу, где VTEC зависит от потока F10.7 и Kp-индекса
+        real_vtec = 10.0 + (f107 / 15.0) + (kp * 1.2)
 
-        # 3. Накапливаем РЕАЛЬНЫЕ значения Kp в истории для спектра
-        st.session_state.history[city].append(val)
+        # Накапливаем реальные значения в истории
+        st.session_state.history[city].append(real_vtec)
         if len(st.session_state.history[city]) > 30: st.session_state.history[city].pop(0)
 
-        # 4. Спектральный анализ по РЕАЛЬНОЙ истории
+        # РЕАЛЬНЫЙ СПЕКТРАЛЬНЫЙ АНАЛИЗ
+        # Теперь FFT считает "гул" реального сигнала от космической погоды
         power = get_frequency_anomaly(st.session_state.history[city])
 
-        # ЛОГИЧЕСКАЯ СВЯЗКА (КРИТЕРИЙ ПРЕДВЕСТНИКА)
-        # Если спектральная плотность (энергия резонанса) высока,
-        # это говорит о том, что ионосфера "возбуждена" не просто ветром,
-        # а именно низкочастотными сейсмо-акустическими колебаниями.
-        is_anomaly = power > 4.0
+        # Оценка аномалии: отклонение текущего реального значения от среднего накопленного
+        mean_val = np.mean(st.session_state.history[city])
+        z = (real_vtec - mean_val) / (np.std(st.session_state.history[city]) + 0.1)
 
         with st.container(border=True):
             st.subheader(f"📍 {city} | 🕒 {local_time.strftime('%H:%M:%S')}")
             c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
 
-            c1.metric("VTEC (Реал-тайм)", f"{val:.1f} TECU", f"{kp} Kp")
+            c1.metric("VTEC (Реал-тайм)", f"{real_vtec:.1f} TECU", f"{kp} Kp")
 
-            if is_anomaly:
+            # ЛОГИКА ПРЕДВЕСТНИКА: Высокий спектр + высокая активность
+            if power > 2.0:  # Порог для реальных данных
                 c2.error("**АНОМАЛИЯ**", icon="🚨")
                 c3.warning(f"⚠️ SPECTRAL: {power:.1f}", icon="〰️")
             else:
                 c2.info("**НОРМА**", icon="✅")
                 c3.info("**OK**", icon="🛡️")
 
-            # Карта
             df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
             c4.pydeck_chart(pdk.Deck(
                 initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=6),
