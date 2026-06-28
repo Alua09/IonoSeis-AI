@@ -60,7 +60,7 @@ def live_vtec_monitor(f107):
     for city, (lat, lon, offset) in CITIES.items():
         local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
 
-        # Динамический расчет VTEC (Глобальное + Суточный ритм + Локальный шум)
+        # Динамический VTEC: база от API + суточный ритм + локальный шум
         real_vtec = 10.0 + (f107 / 20.0) + (kp * 0.8) + (np.sin(hour_offset * 2 * np.pi) * 5) + np.random.normal(0, 0.3)
 
         st.session_state.history[city].append(real_vtec)
@@ -70,11 +70,10 @@ def live_vtec_monitor(f107):
         mean_val = np.mean(st.session_state.history[city])
         z = (real_vtec - mean_val) / (np.std(st.session_state.history[city]) + 0.1)
 
-        # Связываем с реальной сейсмикой
+        # Логическая связка: ИОНОСФЕРА + СЕЙСМИКА
         quakes = get_recent_quakes(lat, lon)
         is_seismic_active = len(quakes) > 0
 
-        # Критерии
         is_ionosphere_anomaly = abs(z) > 1.5
         is_seismic_risk = power > 2.0 and is_seismic_active
 
@@ -93,6 +92,10 @@ def live_vtec_monitor(f107):
                 c3.warning(f"⚠️ **РИСК СЕЙСМИКИ: {power:.1f}**", icon="〰️")
             else:
                 c3.info("**СЕЙСМИЧЕСКИЙ ФОН: ОК**", icon="🛡️")
+
+            if is_ionosphere_anomaly and is_seismic_risk:
+                alert_msg = f"КРИТИЧЕСКИЙ ПРЕДВЕСТНИК в {city}"
+                st.toast(f"🚨 {alert_msg}", icon="🌋")
 
             df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
             c4.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=6),
