@@ -48,7 +48,8 @@ def get_diurnal_trend(hour, lat, f107):
 @st.cache_data(ttl=600)
 def get_recent_quakes(lat, lon):
     try:
-        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=3.0&limit=3"
+        # Увеличили лимит с 3 до 10, чтобы видеть больше событий
+        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=3.0&limit=10"
         res = requests.get(url, timeout=3).json()
         return res.get('features', [])
     except:
