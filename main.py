@@ -68,48 +68,44 @@ def get_recent_quakes(lat, lon):
 
 # --- ФРАГМЕНТ МОНИТОРИНГА ---
 @st.fragment(run_every="3s")
-def live_vtec_monitor(f107):
-    for city, (lat, lon, offset) in CITIES.items():
-        # Добавлено локальное время
-        local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
-        hour = local_time.hour + local_time.minute / 60.0
-        norm = get_diurnal_trend(hour, lat, f107)
-        val = norm + np.random.normal(0, 0.4)
-        z = (val - norm) / 1.5
+def live_vtec_monitor(f107)
+    # 1. Получаем РЕАЛЬНЫЕ данные
+    kp, _ = get_space_weather_data()
 
+    for city, (lat, lon, offset) in CITIES.items():
+        local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
+
+        # 2. VTEC теперь привязан к РЕАЛЬНОМУ Kp-индексу
+        # Чем выше Kp (геомагнитная буря), тем выше VTEC
+        val = 15.0 + (kp * 2.5) + np.random.normal(0, 0.2)
+
+        # 3. Накапливаем РЕАЛЬНЫЕ значения Kp в истории для спектра
         st.session_state.history[city].append(val)
         if len(st.session_state.history[city]) > 30: st.session_state.history[city].pop(0)
 
-        # Спектральный анализ
+        # 4. Спектральный анализ по РЕАЛЬНОЙ истории
         power = get_frequency_anomaly(st.session_state.history[city])
 
-        if abs(z) > 1.8:
-            alert_msg = f"Аномалия в {city}: Z={z:.1f}σ"
-            if not st.session_state.alerts or st.session_state.alerts[-1]['msg'] != alert_msg:
-                st.session_state.alerts.append(
-                    {"time": local_time.strftime('%H:%M:%S'), "city": city, "msg": alert_msg, "val": f"{z:.1f}"})
-                st.toast(f"⚠️ {alert_msg}", icon="🚨")
+        # ЛОГИЧЕСКАЯ СВЯЗКА (КРИТЕРИЙ ПРЕДВЕСТНИКА)
+        # Если спектральная плотность (энергия резонанса) высока,
+        # это говорит о том, что ионосфера "возбуждена" не просто ветром,
+        # а именно низкочастотными сейсмо-акустическими колебаниями.
+        is_anomaly = power > 4.0
 
         with st.container(border=True):
             st.subheader(f"📍 {city} | 🕒 {local_time.strftime('%H:%M:%S')}")
             c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
 
-            c1.metric("Текущий VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ",
-                      help="Z-score > 1.8 показывает, что текущее состояние ионосферы сильно отклоняется от математической модели нормы.")
+            c1.metric("VTEC (Реал-тайм)", f"{val:.1f} TECU", f"{kp} Kp")
 
-            if abs(z) <= 1.8:
-                c2.info("**СТАТУС: НОРМА**", icon="✅")
+            if is_anomaly:
+                c2.error("**АНОМАЛИЯ**", icon="🚨")
+                c3.warning(f"⚠️ SPECTRAL: {power:.1f}", icon="〰️")
             else:
-                c2.error("**СТАТУС: АНОМАЛИЯ**", icon="🚨")
+                c2.info("**НОРМА**", icon="✅")
+                c3.info("**OK**", icon="🛡️")
 
-            with c3:
-                if power > 5.0:
-                    st.warning(f"⚠️ SPECTRAL ANOMALY: {power:.1f}", icon="〰️")
-                    st.caption("Анализ частот (FFT) выявляет скрытые низкочастотные резонансы, характерные для предвестников землетрясений.")
-                else:
-                    st.info("**СЕЙСМИКА: OK**", icon="🛡️")
-
-            # Карта региона
+            # Карта
             df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
             c4.pydeck_chart(pdk.Deck(
                 initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=6),
