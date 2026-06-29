@@ -50,8 +50,8 @@ def get_recent_quakes(lat, lon):
 # --- БОКОВАЯ ПАНЕЛЬ ---
 with st.sidebar:
     st.header("⚙️ Панель управления")
-    st.info("Система активна и ведет мониторинг ионосферных аномалий.", help="В реальном времени отслеживаются возмущения электронной плотности.")
-    if st.button("🗑️ Очистить журнал аномалий", help="Удалить все зафиксированные записи об аномалиях."): st.session_state.alerts = []
+    st.info("Система активна и ведет мониторинг ионосферных аномалий.")
+    if st.button("🗑️ Очистить журнал аномалий"): st.session_state.alerts = []
     st.divider()
     st.write("📡 **Статус сети:** Online")
     st.write("🌍 **Мониторинг:** USGS API")
@@ -62,9 +62,9 @@ st.title("🛰️ IonoSeis AI: Экспертный мониторинг")
 kp, f107 = get_space_weather_data()
 
 c1, c2, c3 = st.columns(3)
-c1.metric("Kp-индекс", kp, help="Геомагнитный индекс (0-9). > 4 — риск искажений данных из-за магнитных бурь.")
-c2.metric("Поток F10.7", f107, help="Показатель солнечного излучения, влияющий на фоновую ионизацию.")
-c3.metric("Время UTC", datetime.now(timezone.utc).strftime('%H:%M:%S'), help="Актуальное время по Гринвичу для синхронизации данных.")
+c1.metric("Kp-индекс", kp, help="Геомагнитный индекс (0-9). > 4 — риск искажений.")
+c2.metric("Поток F10.7", f107, help="Солнечный радиопоток.")
+c3.metric("Время UTC", datetime.now(timezone.utc).strftime('%H:%M:%S'), help="Время по Гринвичу.")
 
 tab1, tab2, tab3, tab4 = st.tabs(["🟢 МОНИТОРИНГ", "🚨 АНОМАЛИИ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 МЕТОДОЛОГИЯ"])
 
@@ -80,22 +80,22 @@ with tab1:
         with st.container(border=True):
             st.subheader(f"📍 {city}")
             sub1, sub2, sub3, sub4 = st.columns([1, 1, 1, 2])
-            sub1.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ", help="Общее электронное содержание ионосферы.")
+            sub1.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ", help="Электронная плотность.")
 
             if abs(z) <= 2.5 and volatility < 0.8:
-                sub2.success("СТАТУС: НОРМА", help="Показатели находятся в пределах статистической нормы.")
+                sub2.success("СТАТУС: НОРМА")
             else:
-                sub2.error("СТАТУС: АНОМАЛИЯ", help="Обнаружено отклонение, требующее проверки сейсмической активности.")
+                sub2.error("СТАТУС: АНОМАЛИЯ")
 
-            sub3.info("Сейсмика: OK", help="Отсутствие значимых сейсмических событий в радиусе 500 км.")
+            sub3.info("Сейсмика: OK")
             df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
             sub4.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=6),
                                        layers=[pdk.Layer("ScatterplotLayer", df, get_position=["lon", "lat"],
-                                                        get_fill_color=[255, 0, 0, 160], get_radius=30000)]), help="Карта зоны тектонического влияния.")
+                                                         get_fill_color=[255, 0, 0, 160], get_radius=30000)]))
 
 with tab2:
     st.subheader("Журнал аномалий")
-    if not st.session_state.alerts: st.info("Аномалий не зафиксировано.", help="Система работает стабильно.")
+    if not st.session_state.alerts: st.info("Аномалий не зафиксировано.")
     for alert in st.session_state.alerts: st.warning(alert)
 
 with tab3:
@@ -105,31 +105,23 @@ with tab3:
             mag = q['properties']['mag']
             dt = datetime.fromtimestamp(q['properties']['time'] / 1000).strftime('%d.%m %H:%M')
             if mag >= 5.0:
-                st.error(f"📅 {dt} | ⚠️ {mag} M | {q['properties']['place']}", help="Высокая магнитуда события.")
+                st.error(f"📅 {dt} | ⚠️ {mag} M | {q['properties']['place']}")
             else:
-                st.write(f"📅 {dt} | {mag} M | {q['properties']['place']}", help="Умеренная или слабая активность.")
+                st.write(f"📅 {dt} | {mag} M | {q['properties']['place']}")
 
 with tab4:
     st.subheader("🧪 Научно-методологическая база")
     st.markdown("---")
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/d/d4/Ionosphere_structure.svg/640px-Ionosphere_structure.svg.png", caption="Литосферно-ионосферное взаимодействие")
-    st.markdown("---")
 
+    st.markdown("---")
     st.markdown("""
     ### Как работает IonoSeis AI (LIS-гипотеза)
-    Наша система основана на гипотезе **Литосферно-Ионосферного Взаимодействия (LIS)**. 
-
-    1. **Физический механизм:** Перед сейсмическим событием в земной коре из-за деформации пород возникают пьезоэлектрические эффекты и выбросы радона. 
-       - *Подсказка:* Радон ионизирует воздух, создавая поток заряженных частиц.
+    1. **Физический механизм:** Перед сейсмическим событием в коре возникают пьезоэлектрические эффекты и выбросы радона, которые ионизируют воздух.
     2. **Ионосферный отклик:** Эти процессы меняют концентрацию электронов (VTEC).
-    3. **Математическая модель (Z-оценка):**
+    3. **Математическая модель:**
     """)
-
     st.latex(r"Z = \frac{VTEC_{obs} - VTEC_{norm}}{\sigma}")
-
     st.markdown("""
-    - *Подсказка:* Если $Z$ выходит за рамки, система фиксирует аномалию.
-    4. **Анализ волатильности:** Рост «нервозности» (скачков) VTEC указывает на накопление напряжения.
-    5. **Фильтрация шумов:** Используем Kp-индекс для исключения магнитных бурь.
+    4. **Анализ волатильности:** Рост «нервозности» (скачков) VTEC — ключевой признак накопления напряжения.
+    5. **Фильтрация:** Используем Kp-индекс для отсечения помех от магнитных бурь.
     """)
-    st.info("💡 **Вывод:** Статистический фильтр позволяет оставить только значимые сигналы.", help="Точность системы повышается за счет отсечения фоновых шумов.")
