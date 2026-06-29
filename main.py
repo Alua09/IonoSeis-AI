@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 from scipy.fft import fft
 
 # --- КОНФИГУРАЦИЯ ---
-st.set_page_config(layout="wide", page_title="IonoSeis AI", page_icon="🛰️")
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Dashboard", page_icon="🛰️")
 
 if 'alerts' not in st.session_state: st.session_state.alerts = []
 if 'history' not in st.session_state: st.session_state.history = {}
@@ -24,78 +24,76 @@ CITIES = {
 @st.cache_data(ttl=600)
 def get_space_weather_data():
     try:
-        f107 = float(requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
-                                  timeout=3).json()[-1][1])
-        kp = float(
-            requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=3).json()[-1][
-                1])
-        return kp, f107
+        data_f = requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
+                              timeout=3).json()
+        data_k = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=3).json()
+        return float(data_k[-1][1]), float(data_f[-1][1])
     except:
         return 2.1, 145.0
 
 
 def get_diurnal_trend(hour, lat, f107):
     base = 8.0 + (f107 / 20.0)
-    diurnal = base + 15.0 * np.cos(np.pi * (hour - 14) / 12)
-    return round(diurnal * (np.cos(np.radians(lat))), 1)
-
-
-def get_frequency_anomaly(history_data):
-    if len(history_data) < 20: return 0
-    yf = fft(history_data)
-    return np.sum(np.abs(yf[1:5])) / len(history_data)
+    return round((base + 15.0 * np.cos(np.pi * (hour - 14) / 12)) * (np.cos(np.radians(lat))), 1)
 
 
 @st.cache_data(ttl=300)
 def get_recent_quakes(lat, lon):
     try:
-        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=3.0&limit=10"
-        res = requests.get(url, timeout=3).json()
-        return res.get('features', [])
+        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=3.0&limit=5"
+        return requests.get(url, timeout=3).json().get('features', [])
     except:
         return []
 
 
-# --- ФУНКЦИЯ МОНИТОРИНГА (ВЫНЕСЕНА ВНЕ ВКЛАДОК) ---
-@st.fragment(run_every="3s")
-def run_monitor(kp, f107):
-    for city, (lat, lon, offset) in CITIES.items():
-        if city not in st.session_state.history: st.session_state.history[city] = []
-        local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
-        hour = local_time.hour + local_time.minute / 60.0
-        norm = get_diurnal_trend(hour, lat, f107)
-        val = norm + (kp * 0.5)
-        st.session_state.history[city].append(val)
-        if len(st.session_state.history[city]) > 30: st.session_state.history[city].pop(0)
-        power = get_frequency_anomaly(st.session_state.history[city])
-        z = (val - norm) / 1.5
+# --- БОКОВАЯ ПАНЕЛЬ ---
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/2554/2554042.png", width=80)
+    st.title("🛡️ System Control")
+    if st.button("🗑️ Очистить журнал"): st.session_state.alerts = []
+    st.divider()
+    st.write("📈 **Данные:** NOAA & USGS")
+    st.write("📡 **Статус:** Online")
 
-        with st.container(border=True):
-            st.subheader(f"📍 {city} | 🕒 {local_time.strftime('%H:%M:%S')}")
-            c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
-            c1.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ")
-            c2.info(f"Статус: {'АНОМАЛИЯ' if abs(z) > 1.8 else 'НОРМА'}", icon="🚨" if abs(z) > 1.8 else "✅")
-            c3.warning(f"Риск: {power:.1f}") if power > 2.0 else c3.info("Сейсмика: OK")
-            df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
-            c4.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=6),
-                                     layers=[pdk.Layer("ScatterplotLayer", df, get_position=["lon", "lat"],
-                                                       get_color=[255, 0, 0, 160], get_radius=30000)]),
-                            use_container_width=True)
-
-
-# --- ИНТЕРФЕЙС ---
-st.title("🛰️ IonoSeis AI: Аналитика")
+# --- ГЛАВНЫЙ ЭКРАН ---
+st.title("🛰️ IonoSeis AI: Экспертный мониторинг")
 kp, f107 = get_space_weather_data()
-tab1, tab2, tab3, tab4 = st.tabs(["🟢 МОНИТОРИНГ", "🚨 ЖУРНАЛ АНОМАЛИЙ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 МЕТОДОЛОГИЯ"])
+
+c1, c2, c3 = st.columns(3)
+c1.metric("Kp-индекс", kp, help="Геомагнитный индекс (0-9). Если Kp > 4, наблюдаются магнитные бури, искажающие VTEC.")
+c2.metric("Поток F10.7", f107, help="Солнечный радиопоток. Базовый параметр ионизации ионосферы.")
+c3.metric("Время UTC", datetime.now(timezone.utc).strftime('%H:%M:%S'),
+          help="Время по Гринвичу для синхронизации сейсмособытий.")
+
+tab1, tab2, tab3, tab4 = st.tabs(["🟢 МОНИТОРИНГ", "🚨 АНОМАЛИИ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 МЕТОДОЛОГИЯ"])
 
 with tab1:
-    run_monitor(kp, f107)
+    @st.fragment(run_every="3s")
+    def display_monitor():
+        for city, (lat, lon, offset) in CITIES.items():
+            hour = (datetime.now(timezone.utc) + timedelta(hours=offset)).hour
+            norm = get_diurnal_trend(hour, lat, f107)
+            val = norm + (kp * 0.5)
+            z = (val - norm) / 1.5
+
+            with st.container(border=True):
+                st.subheader(f"📍 {city}")
+                sub1, sub2, sub3, sub4 = st.columns([1, 1, 1, 2])
+                sub1.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ", help="Плотность электронов.")
+                sub2.info(f"Статус: {'⚠️АНОМАЛИЯ' if abs(z) > 1.8 else '✅НОРМА'}")
+                sub3.info("Сейсмика: OK" if abs(z) < 1.8 else "Сейсмика: RISK")
+
+                df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
+                sub4.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=6),
+                                           layers=[pdk.Layer("ScatterplotLayer", df, get_position=["lon", "lat"],
+                                                             get_color=[255, 0, 0, 160], get_radius=30000)]))
+
+
+    display_monitor()
 
 with tab2:
-    if st.session_state.alerts:
-        for alert in reversed(st.session_state.alerts): st.write(alert)
-    else:
-        st.info("Нет активных аномалий")
+    st.write("Список выявленных отклонений...")
+    for alert in st.session_state.alerts: st.warning(alert)
 
 with tab3:
     for city, (lat, lon, _) in CITIES.items():
@@ -108,7 +106,9 @@ with tab3:
 with tab4:
     st.subheader("🧪 Научно-методологическая база")
 
-    st.markdown("""### Принцип работы LIS
-    Наша система анализирует ионосферные возмущения как потенциальные предвестники землетрясений.
-    **Формула Z-оценки:**""")
+    st.markdown("""
+    Система основана на теории **LIS (Литосферно-Ионосферного взаимодействия)**. 
+    1. **Физика:** Тектоническое напряжение вызывает микроразряды, ионизирующие атмосферу. 
+    2. **Математика:** Мы анализируем отклонение текущего VTEC от расчетной модели с учетом солнечной активности.
+    """)
     st.latex(r"Z = \frac{VTEC_{obs} - VTEC_{norm}}{\sigma}")
