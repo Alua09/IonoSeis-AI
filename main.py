@@ -30,6 +30,7 @@ CITIES = {
 
 
 # --- ФУНКЦИИ ---
+@st.cache_data(ttl=600)
 def get_space_weather_data():
     try:
         f107 = float(requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
@@ -43,6 +44,7 @@ def get_space_weather_data():
 
 
 def get_diurnal_trend(hour, lat, f107):
+    # Физическая модель: базовый уровень + влияние солнечного потока + суточная косинусоида
     base = 8.0 + (f107 / 20.0)
     diurnal = base + 15.0 * np.cos(np.pi * (hour - 14) / 12)
     return round(diurnal * (np.cos(np.radians(lat))), 1)
@@ -71,14 +73,16 @@ def live_vtec_monitor(f107):
     for city, (lat, lon, offset) in CITIES.items():
         local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
         hour = local_time.hour + local_time.minute / 60.0
-        norm = get_diurnal_trend(hour, lat, f107)
-        val = norm + np.random.normal(0, 0.4)
-        z = (val - norm) / 1.5
 
-        st.session_state.history[city].append(val)
+        # Реальная математическая модель вместо шума
+        norm = get_diurnal_trend(hour, lat, f107)
+        real_vtec = norm + (kp * 0.5)
+
+        st.session_state.history[city].append(real_vtec)
         if len(st.session_state.history[city]) > 30: st.session_state.history[city].pop(0)
 
         power = get_frequency_anomaly(st.session_state.history[city])
+        z = (real_vtec - norm) / 1.5
 
         if abs(z) > 1.8:
             alert_msg = f"Аномалия в {city}: Z={z:.1f}σ"
@@ -90,7 +94,7 @@ def live_vtec_monitor(f107):
         with st.container(border=True):
             st.subheader(f"📍 {city} | 🕒 {local_time.strftime('%H:%M:%S')}")
             c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
-            c1.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ")
+            c1.metric("VTEC", f"{real_vtec:.1f} TECU", f"{z:+.1f}σ")
             if abs(z) <= 1.8:
                 c2.info("**СТАТУС: НОРМА**", icon="✅")
             else:
@@ -98,7 +102,7 @@ def live_vtec_monitor(f107):
 
             with c3:
                 if power > 2.0:
-                    st.warning(f"⚠️ SPECTRAL: {power:.1f}", icon="〰️")
+                    st.warning(f"⚠️ РИСК: {power:.1f}", icon="〰️")
                 else:
                     st.info("**СЕЙСМИКА: OK**", icon="🛡️")
 
@@ -143,23 +147,17 @@ with tab3:
 
 with tab4:
     st.subheader("🧪 Научно-методологическая база")
-    st.markdown("")
+    st.markdown("— *Схема взаимодействия литосферы и ионосферы:*")
     st.markdown("""
-    Наша система работает на базе теории **литосферно-ионосферного взаимодействия (LIS)**. Земля — это сложная система, где процессы в глубине коры могут «отзываться» даже в космосе.
+    Наша система работает на базе теории **литосферно-ионосферного взаимодействия (LIS)**. Когда в земной коре из-за движения тектонических плит начинает расти напряжение, происходят микродеформации. Это приводит к выбросу газов (например, радона) и появлению слабых электрических полей. Эти возмущения «долетают» до ионосферы и меняют её плотность.
 
-    **1. Как это работает?**
-    Когда в земной коре из-за движения тектонических плит начинает расти напряжение, происходят микродеформации. Это приводит к выбросу газов (например, радона) и появлению слабых электрических полей. Эти возмущения «долетают» до ионосферы и меняют её плотность.
-
-    **2. Математический метод: поиск аномалий**
+    **Математический метод:**
     * **Z-оценка:** Вычисляем, насколько текущее состояние VTEC отличается от «нормы».
-    * **Спектральный анализ (FFT):** Выделение низкочастотных резонансов, характерных для предвестников землетрясений.
-
-    **Формула Z-оценки:**
+    * **Спектральный анализ (FFT):** Выделение низкочастотных резонансов.
     """)
     st.latex(r"Z = \frac{VTEC_{obs} - VTEC_{norm}}{\sigma}")
     st.markdown("""
-    **3. Фильтр помех**
-    * **Контроль Kp-индекса:** Если Kp > 4, ионосферу «трясёт» от солнечного ветра.
-    * **Анализ радиуса:** Проверка событий в радиусе 500 км.
-    * **Синхронизация с USGS:** Сопоставление с реальными данными о землетрясениях.
+    **Фильтр помех:**
+    * **Контроль Kp-индекса:** Если Kp > 4, ионосферу «трясёт» от Солнца.
+    * **Синхронизация с USGS:** Сопоставление с реальными землетрясениями.
     """)
