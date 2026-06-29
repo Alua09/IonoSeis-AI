@@ -30,20 +30,23 @@ if 'alerts' not in st.session_state:
     st.session_state.alerts = []
 
 if 'history' not in st.session_state:
-    st.session_state.history = {city: [15.0]*20 for city in CITIES}
+    st.session_state.history = {city: [] for city in CITIES}
 else:
     for city in CITIES:
         if city not in st.session_state.history:
-            st.session_state.history[city] = [15.0]*20
+            st.session_state.history[city] = []
+
 
 # --- ФУНКЦИИ ---
 def get_space_weather_data():
     try:
-        data_f = requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json", timeout=3).json()
+        data_f = requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
+                              timeout=3).json()
         data_k = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=3).json()
         return float(data_k[-1][1]), float(data_f[-1][1])
     except:
         return 2.1, 145.0
+
 
 def get_recent_quakes(lat, lon):
     try:
@@ -51,6 +54,7 @@ def get_recent_quakes(lat, lon):
         return requests.get(url, timeout=3).json().get('features', [])
     except:
         return []
+
 
 # --- БОКОВАЯ ПАНЕЛЬ ---
 with st.sidebar:
@@ -77,22 +81,26 @@ with tab1:
     for city, (lat, lon, offset) in CITIES.items():
         val = 15.0 + np.random.normal(0, 0.3)
         st.session_state.history[city].append(val)
-        st.session_state.history[city].pop(0)
+        if len(st.session_state.history[city]) > 20: st.session_state.history[city].pop(0)
 
         volatility = np.std(st.session_state.history[city])
         z = (val - 15.0) / 1.5
 
         with st.container(border=True):
             st.subheader(f"📍 {city}")
-            # Измененная верстка: [Метрики] [График] [Карта]
-            sub1, sub2, sub3, sub4, sub5 = st.columns([1, 1, 1, 2, 0.8])
-            sub1.metric("**VTEC**", f"{val:.1f} TECU", f"{z:+.1f}σ")
-            sub2.metric("**СТАТУС**", "НОРМА" if abs(z) <= 2.5 else "АНОМАЛИЯ")
-            sub3.metric("**СЕЙСМИКА**", "OK")
-            sub4.line_chart(st.session_state.history[city], color="#2dd4bf", height=100)
+            sub1, sub2, sub3, sub4 = st.columns([1, 1, 1, 1])
+            sub1.metric("**VTEC**", f"{val:.1f} TECU", f"{z:+.1f}σ", help="Общее электронное содержание ионосферы.")
+
+            if abs(z) <= 2.5 and volatility < 0.8:
+                sub2.metric("**СТАТУС**", "НОРМА", help="Показатели стабильны.")
+            else:
+                sub2.metric("**СТАТУС**", "АНОМАЛИЯ", delta="ВНИМАНИЕ", help="Выявлено отклонение!")
+
+            sub3.metric("**СЕЙСМИКА**", "OK", help="В радиусе 500 км нет опасных предвестников.")
 
             df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
-            sub5.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=4),
+            # Квадратная карта
+            sub4.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=5),
                                        layers=[pdk.Layer("ScatterplotLayer", df, get_position=["lon", "lat"],
                                                          get_fill_color=[255, 0, 0, 160], get_radius=30000)]))
 
@@ -105,7 +113,8 @@ with tab3:
     for city, (lat, lon, _) in CITIES.items():
         st.subheader(f"🌋 Сейсмо-события: {city}")
         quakes = get_recent_quakes(lat, lon)
-        if not quakes: st.write("Сейсмически спокойно.")
+        if not quakes:
+            st.write("Сейсмически спокойно.")
         for q in quakes:
             mag = q['properties']['mag']
             dt = datetime.fromtimestamp(q['properties']['time'] / 1000).strftime('%d.%m %H:%M')
@@ -116,6 +125,7 @@ with tab3:
 
 with tab4:
     st.subheader("🧪 Научно-методологическая база")
+
     st.markdown("""
     ### Как работает IonoSeis AI (Концепция LIS)
     Наша система основана на гипотезе **Литосферно-Ионосферного Взаимодействия (LIS)**. Мы рассматриваем ионосферу как датчик напряжения в земной коре.
