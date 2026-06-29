@@ -16,7 +16,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Инициализация хранилища
+# Инициализация состояния
 if 'alerts' not in st.session_state: st.session_state.alerts = []
 if 'history' not in st.session_state: st.session_state.history = {}
 
@@ -65,16 +65,26 @@ def get_recent_quakes(lat, lon):
         return []
 
 
-# --- ИНТЕРФЕЙС ---
+# --- БОКОВАЯ ПАНЕЛЬ ---
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/2554/2554042.png", width=80)
+    st.title("🛡️ System Control")
+    if st.button("🗑️ Очистить журнал аномалий"):
+        st.session_state.alerts = []
+        st.rerun()
+    st.divider()
+    st.success("🤖 AI Engine: Active")
+    st.success("📡 Ionosphere API: Connected")
+    st.success("🌍 USGS Seismic: Online")
+
+# --- ОСНОВНОЙ ЭКРАН ---
 st.title("🛰️ IonoSeis AI: Система прогнозирования")
 kp, f107 = get_space_weather_data()
 
 c1, c2, c3 = st.columns(3)
-c1.metric("Kp-индекс", kp,
-          help="Геомагнитный индекс. Значения > 4 говорят о магнитной буре, которая искажает ионосферные данные.")
-c2.metric("Поток F10.7", f107, help="Индекс солнечной активности. Влияет на базовую плотность ионосферы.")
-c3.metric("Время UTC", datetime.now(timezone.utc).strftime('%H:%M:%S'),
-          help="Мировое время для синхронизации с сейсмостанциями.")
+c1.metric("Kp-индекс", kp, help="Геомагнитный индекс. Значения > 4 говорят о магнитной буре.")
+c2.metric("Поток F10.7", f107, help="Индекс солнечной активности.")
+c3.metric("Время UTC", datetime.now(timezone.utc).strftime('%H:%M:%S'), help="Время для синхронизации.")
 
 tab1, tab2, tab3, tab4 = st.tabs(["🟢 МОНИТОРИНГ", "🚨 ЖУРНАЛ АНОМАЛИЙ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 МЕТОДОЛОГИЯ"])
 
@@ -97,22 +107,20 @@ with tab1:
             with st.container(border=True):
                 st.subheader(f"📍 {city} | 🕒 {local_time.strftime('%H:%M:%S')}")
                 col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
-                col1.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ",
-                            help="Плотность электронов в ионосфере (TECU) и отклонение от нормы (σ).")
+                col1.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ", help="Плотность ионосферы.")
                 col2.info(f"Статус: {'АНОМАЛИЯ' if abs(z) > 1.8 else 'НОРМА'}", icon="🚨" if abs(z) > 1.8 else "✅")
                 col3.warning(f"Риск: {power:.1f}", icon="〰️") if power > 2.0 else col3.info("Сейсмика: OK", icon="🛡️")
 
                 df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
                 col4.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=6),
                                            layers=[pdk.Layer("ScatterplotLayer", df, get_position=["lon", "lat"],
-                                                             get_color=[255, 0, 0, 160], get_radius=30000)],
-                                           tooltip={"text": "Регион мониторинга: " + city}), use_container_width=True)
+                                                             get_color=[255, 0, 0, 160], get_radius=30000)]),
+                                  use_container_width=True)
 
 
     run_monitor()
 
 with tab2:
-    st.write("Лог событий при аномальных отклонениях (Z > 1.8σ)")
     for alert in reversed(st.session_state.alerts): st.expander(alert['msg']).write(f"Время: {alert['time']}")
 
 with tab3:
@@ -127,17 +135,9 @@ with tab4:
     st.subheader("🧪 Научно-методологическая база")
 
     st.markdown("""
-    ### Как работает IonoSeis AI?
     Наша система опирается на теорию **литосферно-ионосферного взаимодействия (LIS)**. 
-    1. **Почему Земля влияет на космос?** Перед землетрясением в коре создается колоссальное напряжение. Это приводит к выделению радона и созданию электрических полей, которые «поднимаются» в ионосферу.
-    2. **Зачем нужна карта?** Карта — это инструмент пространственной привязки. Она показывает, где именно мы ведем мониторинг и соотносит данные с сейсмическими разломами в радиусе 500 км.
-    3. **Почему мы не ошибаемся?** Мы используем Kp-индекс (от NOAA) как фильтр. Если Kp > 4, система понимает, что возмущения вызваны Солнцем, а не тектоникой.
-
-    **Математическая формула Z-оценки:**
+    1. **Почему Земля влияет на космос?** Перед землетрясением в коре создается колоссальное напряжение, которое меняет плотность ионосферы.
+    2. **Зачем нужна карта?** Карта помогает визуализировать регионы мониторинга и их близость к тектоническим разломам.
+    3. **Почему мы не ошибаемся?** Kp-индекс от NOAA помогает отсечь помехи от магнитных бурь.
     """)
     st.latex(r"Z = \frac{VTEC_{obs} - VTEC_{norm}}{\sigma}")
-    st.markdown("""
-    * $VTEC_{obs}$ — текущее значение плотности плазмы.
-    * $VTEC_{norm}$ — расчетная модель нормы (зависит от Солнца).
-    * $\sigma$ — статистический шум.
-    """)
