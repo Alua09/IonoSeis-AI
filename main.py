@@ -100,7 +100,13 @@ with tab3:
 
 with tab4:
     st.subheader("🧪 Научно-методологическая база")
-        st.markdown("""
+
+    # Вставляем изображение правильно (вне markdown-блока)
+    st.image(
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d3/Ionosphere_layers.svg/600px-Ionosphere_layers.svg.png",
+        caption="Структура ионосферы")
+
+    st.markdown("""
     ### Как работает IonoSeis AI (Концепция LIS)
     Наша система основана на гипотезе **Литосферно-Ионосферного Взаимодействия (LIS)**. Мы анализируем ионосферу как «гигантский датчик», реагирующий на напряжение в земной коре.
 
