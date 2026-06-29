@@ -16,10 +16,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-if 'alerts' not in st.session_state: st.session_state.alerts = []
-if 'history' not in st.session_state: st.session_state.history = {city: [] for city in
-                                                                  ["Алматы", "Бишкек", "Токио", "Тайвань (Хуалянь)", "Стамбул"]}
-
+# Список городов
 CITIES = {
     "Алматы": (43.25, 76.92, 5),
     "Бишкек": (42.87, 74.59, 6),
@@ -28,17 +25,25 @@ CITIES = {
     "Стамбул": (41.00, 28.97, 3)
 }
 
+# --- ИНИЦИАЛИЗАЦИЯ СОСТОЯНИЯ ---
+if 'alerts' not in st.session_state:
+    st.session_state.alerts = []
+
+if 'history' not in st.session_state:
+    st.session_state.history = {city: [] for city in CITIES}
+else:
+    for city in CITIES:
+        if city not in st.session_state.history:
+            st.session_state.history[city] = []
 
 # --- ФУНКЦИИ ---
 def get_space_weather_data():
     try:
-        data_f = requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
-                              timeout=3).json()
+        data_f = requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json", timeout=3).json()
         data_k = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=3).json()
         return float(data_k[-1][1]), float(data_f[-1][1])
     except:
         return 2.1, 145.0
-
 
 def get_recent_quakes(lat, lon):
     try:
@@ -46,7 +51,6 @@ def get_recent_quakes(lat, lon):
         return requests.get(url, timeout=3).json().get('features', [])
     except:
         return []
-
 
 # --- БОКОВАЯ ПАНЕЛЬ ---
 with st.sidebar:
@@ -116,7 +120,6 @@ with tab3:
 
 with tab4:
     st.subheader("🧪 Научно-методологическая база")
-
     st.markdown("""
     ### Как работает IonoSeis AI (Концепция LIS)
     Наша система основана на гипотезе **Литосферно-Ионосферного Взаимодействия (LIS)**. Мы рассматриваем ионосферу как датчик напряжения в земной коре.
