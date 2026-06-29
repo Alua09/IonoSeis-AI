@@ -30,11 +30,11 @@ if 'alerts' not in st.session_state:
     st.session_state.alerts = []
 
 if 'history' not in st.session_state:
-    st.session_state.history = {city: [] for city in CITIES}
+    st.session_state.history = {city: [15.0]*20 for city in CITIES}
 else:
     for city in CITIES:
         if city not in st.session_state.history:
-            st.session_state.history[city] = []
+            st.session_state.history[city] = [15.0]*20
 
 # --- ФУНКЦИИ ---
 def get_space_weather_data():
@@ -67,14 +67,15 @@ st.title("🛰️ IonoSeis AI: Экспертный мониторинг")
 kp, f107 = get_space_weather_data()
 
 c1, c2, c3 = st.columns(3)
-c1.metric("Kp-индекс", kp, help="Геомагнитный индекс (0-9). > 4 — возможны ложные срабатывания.")
-c2.metric("Поток F10.7", f107, help="Интенсивность солнечного радиопотока.")
-c3.metric("Время UTC", datetime.now(timezone.utc).strftime('%H:%M:%S'), help="Время по Гринвичу.")
+c1.metric("**Kp-индекс**", kp, help="Геомагнитный индекс (0-9). > 4 — возможны ложные срабатывания.")
+c2.metric("**Поток F10.7**", f107, help="Интенсивность солнечного радиопотока.")
+c3.metric("**Время UTC**", datetime.now(timezone.utc).strftime('%H:%M:%S'), help="Время по Гринвичу.")
 
 tab1, tab2, tab3, tab4 = st.tabs(["🟢 МОНИТОРИНГ", "🚨 АНОМАЛИИ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 МЕТОДОЛОГИЯ"])
 
 with tab1:
     for city, (lat, lon, offset) in CITIES.items():
+        # Здесь подключается источник данных
         val = 15.0 + np.random.normal(0, 0.3)
         st.session_state.history[city].append(val)
         if len(st.session_state.history[city]) > 20: st.session_state.history[city].pop(0)
@@ -84,20 +85,21 @@ with tab1:
 
         with st.container(border=True):
             st.subheader(f"📍 {city}")
-            sub1, sub2, sub3, sub4 = st.columns([1, 1, 1, 2])
-            sub1.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ", help="Общее электронное содержание ионосферы.")
+            sub1, sub2, sub3, sub4 = st.columns([1, 1, 1, 1])
+            sub1.metric("**VTEC**", f"{val:.1f} TECU", f"{z:+.1f}σ", help="Общее электронное содержание ионосферы.")
 
             if abs(z) <= 2.5 and volatility < 0.8:
-                sub2.metric("СТАТУС", "НОРМА", help="Показатели стабильны.")
+                sub2.metric("**СТАТУС**", "НОРМА", help="Показатели стабильны.")
             else:
-                sub2.metric("СТАТУС", "АНОМАЛИЯ", delta="ВНИМАНИЕ", help="Выявлено отклонение!")
+                sub2.metric("**СТАТУС**", "АНОМАЛИЯ", delta="ВНИМАНИЕ", help="Выявлено отклонение!")
 
-            sub3.metric("СЕЙСМИКА", "OK", help="В радиусе 500 км нет опасных предвестников.")
+            sub3.metric("**СЕЙСМИКА**", "OK", help="В радиусе 500 км нет опасных предвестников.")
 
             df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
-            sub4.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=6),
-                                       layers=[pdk.Layer("ScatterplotLayer", df, get_position=["lon", "lat"],
-                                                         get_fill_color=[255, 0, 0, 160], get_radius=30000)]))
+            # Квадратная карта
+            sub4.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=5),
+                                        layers=[pdk.Layer("ScatterplotLayer", df, get_position=["lon", "lat"],
+                                                        get_fill_color=[255, 0, 0, 160], get_radius=30000)]))
 
 with tab2:
     st.subheader("Журнал аномалий")
