@@ -18,19 +18,18 @@ st.markdown("""
 
 # Инициализация хранилища
 if 'alerts' not in st.session_state: st.session_state.alerts = []
-if 'history' not in st.session_state: st.session_state.history = {city: [] for city in
-                                                                  ["Алматы", "Бишкек", "Токио", "Каракас"]}
+if 'history' not in st.session_state: st.session_state.history = {}
 
 CITIES = {
     "Алматы": (43.25, 76.92, 5),
     "Бишкек": (42.87, 74.59, 6),
     "Токио": (35.68, 139.65, 9),
     "Каракас": (10.48, -66.90, -4),
-    "Тайвань (Хуалянь)": (24.00, 121.60, 8) # Активная зона для теста M>6.0
+    "Тайвань (Хуалянь)": (24.00, 121.60, 8)
 }
 
+
 # --- ФУНКЦИИ ---
-@st.cache_data(ttl=600)
 def get_space_weather_data():
     try:
         f107 = float(requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
@@ -44,7 +43,6 @@ def get_space_weather_data():
 
 
 def get_diurnal_trend(hour, lat, f107):
-    # Физическая модель: базовый уровень + влияние солнечного потока + суточная косинусоида
     base = 8.0 + (f107 / 20.0)
     diurnal = base + 15.0 * np.cos(np.pi * (hour - 14) / 12)
     return round(diurnal * (np.cos(np.radians(lat))), 1)
@@ -71,18 +69,19 @@ def get_recent_quakes(lat, lon):
 def live_vtec_monitor(f107):
     kp, _ = get_space_weather_data()
     for city, (lat, lon, offset) in CITIES.items():
+        # Инициализация ключа города, если он новый
+        if city not in st.session_state.history: st.session_state.history[city] = []
+
         local_time = datetime.now(timezone.utc) + timedelta(hours=offset)
         hour = local_time.hour + local_time.minute / 60.0
-
-        # Реальная математическая модель вместо шума
         norm = get_diurnal_trend(hour, lat, f107)
-        real_vtec = norm + (kp * 0.5)
+        val = norm + (kp * 0.5)
 
-        st.session_state.history[city].append(real_vtec)
+        st.session_state.history[city].append(val)
         if len(st.session_state.history[city]) > 30: st.session_state.history[city].pop(0)
 
         power = get_frequency_anomaly(st.session_state.history[city])
-        z = (real_vtec - norm) / 1.5
+        z = (val - norm) / 1.5
 
         if abs(z) > 1.8:
             alert_msg = f"Аномалия в {city}: Z={z:.1f}σ"
@@ -94,7 +93,7 @@ def live_vtec_monitor(f107):
         with st.container(border=True):
             st.subheader(f"📍 {city} | 🕒 {local_time.strftime('%H:%M:%S')}")
             c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
-            c1.metric("VTEC", f"{real_vtec:.1f} TECU", f"{z:+.1f}σ")
+            c1.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ")
             if abs(z) <= 1.8:
                 c2.info("**СТАТУС: НОРМА**", icon="✅")
             else:
@@ -148,6 +147,7 @@ with tab3:
 with tab4:
     st.subheader("🧪 Научно-методологическая база")
     st.markdown("— *Схема взаимодействия литосферы и ионосферы:*")
+
     st.markdown("""
     Наша система работает на базе теории **литосферно-ионосферного взаимодействия (LIS)**. Когда в земной коре из-за движения тектонических плит начинает расти напряжение, происходят микродеформации. Это приводит к выбросу газов (например, радона) и появлению слабых электрических полей. Эти возмущения «долетают» до ионосферы и меняют её плотность.
 
