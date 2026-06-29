@@ -36,17 +36,14 @@ else:
         if city not in st.session_state.history:
             st.session_state.history[city] = []
 
-
 # --- ФУНКЦИИ ---
 def get_space_weather_data():
     try:
-        data_f = requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json",
-                              timeout=3).json()
+        data_f = requests.get("https://services.swpc.noaa.gov/products/noaa-f10.7-flux-between-events.json", timeout=3).json()
         data_k = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=3).json()
         return float(data_k[-1][1]), float(data_f[-1][1])
     except:
         return 2.1, 145.0
-
 
 def get_recent_quakes(lat, lon):
     try:
@@ -54,7 +51,6 @@ def get_recent_quakes(lat, lon):
         return requests.get(url, timeout=3).json().get('features', [])
     except:
         return []
-
 
 # --- БОКОВАЯ ПАНЕЛЬ ---
 with st.sidebar:
@@ -71,9 +67,9 @@ st.title("🛰️ IonoSeis AI: Экспертный мониторинг")
 kp, f107 = get_space_weather_data()
 
 c1, c2, c3 = st.columns(3)
-c1.metric("**Kp-индекс**", kp, help="Геомагнитный индекс (0-9). > 4 — возможны ложные срабатывания.")
-c2.metric("**Поток F10.7**", f107, help="Интенсивность солнечного радиопотока.")
-c3.metric("**Время UTC**", datetime.now(timezone.utc).strftime('%H:%M:%S'), help="Время по Гринвичу.")
+c1.metric("Kp-индекс", kp, help="Геомагнитный индекс (0-9). > 4 — возможны ложные срабатывания.")
+c2.metric("Поток F10.7", f107, help="Интенсивность солнечного радиопотока.")
+c3.metric("Время UTC", datetime.now(timezone.utc).strftime('%H:%M:%S'), help="Время по Гринвичу.")
 
 tab1, tab2, tab3, tab4 = st.tabs(["🟢 МОНИТОРИНГ", "🚨 АНОМАЛИИ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 МЕТОДОЛОГИЯ"])
 
@@ -88,19 +84,18 @@ with tab1:
 
         with st.container(border=True):
             st.subheader(f"📍 {city}")
-            sub1, sub2, sub3, sub4 = st.columns([1, 1, 1, 1])
-            sub1.metric("**VTEC**", f"{val:.1f} TECU", f"{z:+.1f}σ", help="Общее электронное содержание ионосферы.")
+            sub1, sub2, sub3, sub4 = st.columns([1, 1, 1, 2])
+            sub1.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ", help="Общее электронное содержание ионосферы.")
 
             if abs(z) <= 2.5 and volatility < 0.8:
-                sub2.metric("**СТАТУС**", "НОРМА", help="Показатели стабильны.")
+                sub2.metric("СТАТУС", "НОРМА", help="Показатели стабильны.")
             else:
-                sub2.metric("**СТАТУС**", "АНОМАЛИЯ", delta="ВНИМАНИЕ", help="Выявлено отклонение!")
+                sub2.metric("СТАТУС", "АНОМАЛИЯ", delta="ВНИМАНИЕ", help="Выявлено отклонение!")
 
-            sub3.metric("**СЕЙСМИКА**", "OK", help="В радиусе 500 км нет опасных предвестников.")
+            sub3.metric("СЕЙСМИКА", "OK", help="В радиусе 500 км нет опасных предвестников.")
 
             df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
-            # Квадратная карта
-            sub4.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=5),
+            sub4.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=6),
                                        layers=[pdk.Layer("ScatterplotLayer", df, get_position=["lon", "lat"],
                                                          get_fill_color=[255, 0, 0, 160], get_radius=30000)]))
 
@@ -125,7 +120,6 @@ with tab3:
 
 with tab4:
     st.subheader("🧪 Научно-методологическая база")
-
     st.markdown("""
     ### Как работает IonoSeis AI (Концепция LIS)
     Наша система основана на гипотезе **Литосферно-Ионосферного Взаимодействия (LIS)**. Мы рассматриваем ионосферу как датчик напряжения в земной коре.
