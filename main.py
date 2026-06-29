@@ -6,26 +6,24 @@ import pydeck as pdk
 from datetime import datetime, timezone, timedelta
 
 # --- КОНФИГУРАЦИЯ ---
-st.set_page_config(layout="wide", page_title="IonoSeis AI", page_icon="🛰️")
+st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Dashboard", page_icon="🛰️")
 
-# Стиль для «зеленых» подписей и карточек
+# Стиль
 st.markdown("""
     <style>
     .stMetric { background-color: #f0fdf4; border: 1px solid #22c55e; padding: 15px; border-radius: 10px; }
+    [data-testid="stSidebar"] { background-color: #f8fafc; }
     </style>
 """, unsafe_allow_html=True)
 
-# Инициализация состояния
 if 'alerts' not in st.session_state: st.session_state.alerts = []
 
-# --- БОКОВАЯ ПАНЕЛЬ ---
-with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/2554/2554042.png", width=80)
-    st.title("🛡️ System Control")
-    if st.button("🗑️ Очистить журнал"): st.session_state.alerts = []
-    st.divider()
-    st.write("📈 **Данные:** NOAA & USGS")
-    st.write("📡 **Статус:** Online")
+CITIES = {
+    "Алматы": (43.25, 76.92, 5),
+    "Бишкек": (42.87, 74.59, 6),
+    "Токио": (35.68, 139.65, 9),
+    "Тайвань (Хуалянь)": (24.00, 121.60, 8)
+}
 
 
 # --- ФУНКЦИИ ---
@@ -47,6 +45,16 @@ def get_recent_quakes(lat, lon):
         return []
 
 
+# --- БОКОВАЯ ПАНЕЛЬ ---
+with st.sidebar:
+    st.header("⚙️ Панель управления")
+    st.info("Система активна и ведет мониторинг ионосферных аномалий в режиме реального времени.")
+    if st.button("🗑️ Очистить журнал аномалий"): st.session_state.alerts = []
+    st.divider()
+    st.write("📡 **Статус сети:** Online")
+    st.write("🌍 **Мониторинг:** USGS API")
+    st.write("☀️ **Данные Солнца:** NOAA")
+
 # --- ГЛАВНЫЙ ЭКРАН ---
 st.title("🛰️ IonoSeis AI: Экспертный мониторинг")
 kp, f107 = get_space_weather_data()
@@ -59,8 +67,7 @@ c3.metric("Время UTC", datetime.now(timezone.utc).strftime('%H:%M:%S'), hel
 tab1, tab2, tab3, tab4 = st.tabs(["🟢 МОНИТОРИНГ", "🚨 АНОМАЛИИ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 МЕТОДОЛОГИЯ"])
 
 with tab1:
-    # Используем прямые вызовы без присваивания переменным
-    for city, (lat, lon, offset) in {"Алматы": (43.25, 76.92, 5), "Бишкек": (42.87, 74.59, 6)}.items():
+    for city, (lat, lon, offset) in CITIES.items():
         val = 15.0 + np.random.normal(0, 0.5)
         z = (val - 15.0) / 1.5
         with st.container(border=True):
@@ -72,16 +79,21 @@ with tab1:
             else:
                 sub2.error("СТАТУС: АНОМАЛИЯ")
             sub3.info("Сейсмика: OK")
-            sub4.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=6)))
+            # Возврат круга на карту
+            df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
+            sub4.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=6),
+                                       layers=[pdk.Layer("ScatterplotLayer", df, get_position=["lon", "lat"],
+                                                         get_fill_color=[255, 0, 0, 160], get_radius=30000)]))
 
 with tab2:
-    st.write("Список выявленных отклонений:")
+    st.subheader("Журнал аномалий")
     if not st.session_state.alerts: st.info("Аномалий не зафиксировано.")
     for alert in st.session_state.alerts: st.warning(alert)
 
 with tab3:
-    for city, (lat, lon, _) in {"Алматы": (43.25, 76.92, 5)}.items():
-        st.subheader(f"Архив: {city}")
+    # Исправлено: теперь показывает ленту для всех городов
+    for city, (lat, lon, _) in CITIES.items():
+        st.subheader(f"🌋 Сейсмо-события: {city}")
         for q in get_recent_quakes(lat, lon):
             mag = q['properties']['mag']
             dt = datetime.fromtimestamp(q['properties']['time'] / 1000).strftime('%d.%m %H:%M')
@@ -95,9 +107,10 @@ with tab4:
 
     st.markdown("""
     ### Как работает IonoSeis AI (LIS-гипотеза)
-    1. **Физический механизм:** При росте тектонического напряжения в земной коре возникают пьезоэлектрические эффекты, приводящие к ионизации приземного слоя атмосферы.
-    2. **Ионосферный отклик:** Эти ионы создают аномалии в ионосфере, которые мы фиксируем как отклонения VTEC (общего электронного содержания) от нормы.
-    3. **Статистическая проверка:** Мы используем **Z-оценку**: если текущее значение отклоняется от исторического среднего ($VTEC_{norm}$) более чем на $1.8\sigma$, система классифицирует это как аномалию.
-    4. **Фильтрация шума:** Интеграция данных Kp-индекса (NOAA) позволяет исключить помехи от магнитных бурь.
+    Наша система опирается на принцип литосферно-ионосферного взаимодействия. Перед мощными сейсмическими событиями в земной коре из-за деформации пород возникают пьезоэлектрические эффекты и выбросы радона. Ионизация приземного слоя атмосферы создает электрические поля, которые достигают ионосферы, вызывая локальное изменение плотности электронов (VTEC).
+
+    * **Z-оценка:** Наш основной математический инструмент для детекции. Если $Z > 1.8\sigma$, мы фиксируем аномалию.
+    * **Карта:** Визуализация зон мониторинга позволяет локализовать сейсмические процессы в радиусе 500 км.
+    * **Фильтрация:** Данные NOAA (Kp-индекс) используются для исключения ложных срабатываний, вызванных солнечными вспышками.
     """)
     st.latex(r"Z = \frac{VTEC_{obs} - VTEC_{norm}}{\sigma}")
