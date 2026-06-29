@@ -11,7 +11,7 @@ st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Dashboard", pa
 # Улучшенный стиль: зеленые акценты и четкие карточки
 st.markdown("""
     <style>
-    [data-testid="stMetric"] { background-color: #f0fdf4; border: 1px solid #22c55e; padding: 10px; border-radius: 10px; }
+    [data-testid="stMetric"] { background-color: #f0fdf4; border: 1px solid #22c55e; padding: 15px; border-radius: 10px; }
     [data-testid="stSidebar"] { background-color: #f7fee7; }
     </style>
 """, unsafe_allow_html=True)
@@ -88,34 +88,57 @@ with tab1:
 
         with st.container(border=True):
             st.subheader(f"📍 {city}")
-            # Распределяем элементы: метрики (влево) + график и карта (вправо)
-            col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 2, 1])
+            # Разделили на 3 колонки: [Метрики] [График] [Карта]
+            col_metrics, col_chart, col_map = st.columns([1, 2, 1])
 
-            col1.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ")
+            with col_metrics:
+                st.metric("VTEC", f"{val:.1f} TECU", f"{z:+.1f}σ")
+                if abs(z) <= 2.5 and volatility < 0.8:
+                    st.metric("СТАТУС", "НОРМА")
+                else:
+                    st.metric("СТАТУС", "АНОМАЛИЯ", delta="ВНИМАНИЕ")
+                st.metric("СЕЙСМИКА", "OK")
 
-            if abs(z) <= 2.5 and volatility < 0.8:
-                col2.metric("СТАТУС", "НОРМА")
+            with col_chart:
+                st.line_chart(st.session_state.history[city], color="#2dd4bf")
+
+            with col_map:
+                df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
+                st.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=5),
+                                         layers=[pdk.Layer("ScatterplotLayer", df, get_position=["lon", "lat"],
+                                                           get_fill_color=[255, 0, 0, 160], get_radius=30000)]))
+
+with tab2:
+    st.subheader("Журнал аномалий")
+    if not st.session_state.alerts: st.info("Аномалий не зафиксировано.")
+    for alert in st.session_state.alerts: st.warning(alert)
+
+with tab3:
+    for city, (lat, lon, _) in CITIES.items():
+        st.subheader(f"🌋 Сейсмо-события: {city}")
+        quakes = get_recent_quakes(lat, lon)
+        if not quakes:
+            st.write("Сейсмически спокойно.")
+        for q in quakes:
+            mag = q['properties']['mag']
+            dt = datetime.fromtimestamp(q['properties']['time'] / 1000).strftime('%d.%m %H:%M')
+            if mag >= 5.0:
+                st.error(f"📅 {dt} | ⚠️ {mag} M | {q['properties']['place']}")
             else:
-                col2.metric("СТАТУС", "АНОМАЛИЯ", delta="ВНИМАНИЕ")
-
-            col3.metric("СЕЙСМИКА", "OK")
-
-            # Бирюзовый график
-            col4.line_chart(st.session_state.history[city], color="#2dd4bf", height=100)
-
-            # Карта
-            df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
-            col5.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=5),
-                                       layers=[pdk.Layer("ScatterplotLayer", df, get_position=["lon", "lat"],
-                                                         get_fill_color=[255, 0, 0, 160], get_radius=30000)]))
+                st.write(f"📅 {dt} | {mag} M | {q['properties']['place']}")
 
 with tab4:
     st.subheader("🧪 Научно-методологическая база")
+    # Для понимания концепции LIS
 
     st.markdown("""
     ### Как работает IonoSeis AI (Концепция LIS)
-    1. **Физический процесс:** Выброс газа **Радон** ионизирует атмосферу перед землетрясением.
-    2. **Электрический отклик:** Искажение плотности электронов (**VTEC**) на высотах 100–300 км.
-    3. **Математический поиск (Z-оценка):**
+    1. **Физический процесс:** Выброс газа **Радон** ионизирует приземный слой атмосферы.
+    2. **Электрический отклик:** Ионы поднимаются вверх и искажают плотность электронов (**VTEC**).
+    3. **Математический поиск:**
     """)
     st.latex(r"Z = \frac{VTEC_{obs} - VTEC_{norm}}{\sigma}")
+    st.markdown("""
+    * **Z-оценка:** Выявление отклонений от фонового уровня.
+    * **Волатильность:** Индикатор накопления тектонического напряжения.
+    """)
