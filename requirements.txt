@@ -13,3 +13,4 @@ pydeck
 scipy
 pyigc
 georinex
+pydeck
