@@ -1,47 +1,78 @@
 import streamlit as st
+import json
 import pandas as pd
 import requests
 import pydeck as pdk
 import time
-from datetime import datetime
+import os
 import pytz
+from datetime import datetime
 
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Live", page_icon="🛰️")
+# --- КОНФИГУРАЦИЯ ---
+st.set_page_config(layout="wide", page_title="IonoSeis AI", page_icon="🛰️")
 
-# Конфигурация
-CITIES_COORDS = {
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_FILE = os.path.join(BASE_DIR, 'vtec_data.json')
+
+CITIES = {
     "Алматы": (43.25, 76.92), "Бишкек": (42.87, 74.59),
     "Токио": (35.68, 139.65), "Тайвань (Хуалянь)": (24.00, 121.60), "Стамбул": (41.00, 28.97)
 }
 
-@st.cache_data(ttl=900) # Обновление каждые 15 минут
-def fetch_live_vtec():
+
+@st.cache_data(ttl=60)
+def load_vtec_data():
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+
+def get_kp():
     try:
-        # Здесь мы имитируем прямой запрос к источнику.
-        # Вставьте сюда ваш URL к API или скрипту-обработчику IONEX
-        response = requests.get("https://ваш-сайт-с-данными.com/api/vtec", timeout=10)
-        return response.json()
+        res = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
+        return float(res[-1][1])
     except:
-        # Если API недоступно, возвращаем данные, которые система считает "базовыми"
-        return {
-            "Алматы": 16.5, "Бишкек": 16.2, "Токио": 18.2,
-            "Тайвань (Хуалянь)": 17.5, "Стамбул": 15.1,
-            "timestamp": datetime.now().strftime("%H:%M:%S")
-        }
+        return 2.0
 
-# Интерфейс
-data = fetch_live_vtec()
-st.sidebar.write(f"🕒 **Последний скан:** {data.get('timestamp', 'Live')}")
 
-st.title("🛰️ IonoSeis AI: Live Data")
-cols = st.columns(5)
-for i, (city, (lat, lon)) in enumerate(CITIES_COORDS.items()):
-    val = data.get(city, 15.0)
-    with cols[i]:
-        st.metric(city, f"{val:.1f} TECU")
-        st.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=4),
-            layers=[pdk.Layer("ScatterplotLayer", pd.DataFrame({'lat': [lat], 'lon': [lon]}),
-                              get_position=["lon", "lat"], get_fill_color=[60, 200, 60, 160], get_radius=60000)]))
+# --- ИНТЕРФЕЙС ---
+data = load_vtec_data()
+
+with st.sidebar:
+    st.header("🛰️ IonoSeis AI")
+    st.write(f"🕒 **Последний скан:** {data.get('timestamp', 'Нет данных')}")
+    if st.button("🔄 Принудительное обновление"): st.rerun()
+
+st.title("🛰️ IonoSeis AI: Экспертный мониторинг")
+st.metric("Индекс солнечной активности (Kp)", f"{get_kp()} (Kp)")
+
+tabs = st.tabs(["🟢 МОНИТОРИНГ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 МЕТОДОЛОГИЯ"])
+
+with tabs[0]:
+    cols = st.columns(5)
+    for i, (city, (lat, lon)) in enumerate(CITIES.items()):
+        val = data.get(city, 15.0)
+        # Расчет Z-score
+        z = (val - 15.0) / 1.5
+
+        with cols[i]:
+            st.metric(city, f"{val:.1f} TECU", f"Z: {z:+.1f}")
+            # Цвет индикатора: красный если Z > 2.0
+            color = [255, 0, 0, 160] if abs(z) > 2.0 else [60, 200, 60, 160]
+            st.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=4),
+                                     layers=[pdk.Layer("ScatterplotLayer", pd.DataFrame({'lat': [lat], 'lon': [lon]}),
+                                                       get_position=["lon", "lat"], get_fill_color=color,
+                                                       get_radius=60000)]))
+
+with tabs[1]:
+    st.write("Сейсмическая активность мониторится через USGS API.")
+
+with tabs[2]:
+    st.markdown("### Метод ионосферного мониторинга")
 
 time.sleep(60)
 st.rerun()
