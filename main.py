@@ -22,7 +22,27 @@ CITIES = {
 }
 
 
-# --- ФУНКЦИИ ---
+# --- ФУНКЦИИ (ОПРЕДЕЛЯЕМ ИХ ПЕРВЫМИ) ---
+
+def load_vtec_data():
+    """Чтение данных из локального файла JSON"""
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+
+def get_kp():
+    try:
+        res = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
+        return float(res[-1][1])
+    except:
+        return 2.0
+
+
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371
     dLat, dLon = radians(lat2 - lat1), radians(lon2 - lon1)
@@ -36,7 +56,7 @@ def get_filtered_seismic_data():
     try:
         res = requests.get(url, timeout=10).json()
         data = []
-        for f in res['features']:
+        for f in res.get('features', []):
             props = f['properties']
             quake_lat, quake_lon = f['geometry']['coordinates'][1], f['geometry']['coordinates'][0]
             for city, (c_lat, c_lon, _) in CITIES.items():
@@ -52,18 +72,9 @@ def get_filtered_seismic_data():
         return pd.DataFrame()
 
 
-def get_kp():
-    try:
-        res = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
-        return float(res[-1][1])
-    except:
-        return 2.0
-
-
-# --- ИНТЕРФЕЙС ---
+# --- ИНТЕРФЕЙС (ВЫЗЫВАЕМ ФУНКЦИИ ТОЛЬКО ЗДЕСЬ) ---
 data = load_vtec_data()
 
-# БОКОВАЯ ПАНЕЛЬ
 with st.sidebar:
     st.header("🛰️ IonoSeis AI")
     st.write(f"🕒 **Последний скан (UTC):** {data.get('timestamp', 'Нет данных')}")
