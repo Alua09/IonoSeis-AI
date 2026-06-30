@@ -3,9 +3,10 @@ import json
 import pandas as pd
 import requests
 import pydeck as pdk
-import time
 import os
+import pytz
 from datetime import datetime, timedelta
+from math import radians, cos, sin, asin, sqrt
 
 # --- КОНФИГУРАЦИЯ ---
 st.set_page_config(layout="wide", page_title="IonoSeis AI", page_icon="🛰️")
@@ -13,16 +14,51 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, 'vtec_data.json')
 
 CITIES = {
-    "Алматы": (43.25, 76.92), "Бишкек": (42.87, 74.59),
-    "Токио": (35.68, 139.65), "Тайвань (Хуалянь)": (24.00, 121.60), "Стамбул": (41.00, 28.97)
+    "Алматы": (43.25, 76.92, "Asia/Almaty"),
+    "Бишкек": (42.87, 74.59, "Asia/Bishkek"),
+    "Токио": (35.68, 139.65, "Asia/Tokyo"),
+    "Тайвань (Хуалянь)": (24.00, 121.60, "Asia/Taipei"),
+    "Стамбул": (41.00, 28.97, "Europe/Istanbul")
 }
 
 
 # --- ФУНКЦИИ ---
+def haversine(lat1, lon1, lat2, lon2):
+    """Расстояние в км между двумя точками"""
+    R = 6371
+    dLat, dLon = radians(lat2 - lat1), radians(lon2 - lon1)
+    a = sin(dLat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dLon / 2) ** 2
+    return R * 2 * asin(sqrt(a))
 
-@st.cache_data(ttl=60)
+
+@st.cache_data(ttl=300)
+def get_filtered_seismic_data():
+    """Землетрясения 4.0+ в радиусе 500км от наших городов"""
+    url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=4.0&limit=200"
+    try:
+        res = requests.get(url, timeout=10).json()
+        data = []
+        for f in res['features']:
+            props = f['properties']
+            coords = f['geometry']['coordinates']  # [lon, lat]
+            quake_lat, quake_lon = coords[1], coords[0]
+
+            # Проверка дистанции до любого из городов
+            for city, (c_lat, c_lon, _) in CITIES.items():
+                if haversine(quake_lat, quake_lon, c_lat, c_lon) < 500:
+                    data.append({
+                        "Магнитуда": props['mag'],
+                        "Ближайший город": city,
+                        "Место": props['place'],
+                        "Время": datetime.fromtimestamp(props['time'] / 1000).strftime('%d.%m %H:%M')
+                    })
+                    break
+        return pd.DataFrame(data)
+    except:
+        return pd.DataFrame()
+
+
 def load_vtec_data():
-    """Чтение данных из локального файла JSON"""
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
@@ -32,52 +68,28 @@ def load_vtec_data():
     return {}
 
 
-@st.cache_data(ttl=300)
-def get_seismic_data():
-    """Получение землетрясений 4.5+ за последние 3 дня"""
-    end_time = datetime.now()
-    start_time = end_time - timedelta(days=3)
-    url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={start_time.strftime('%Y-%m-%d')}&minmagnitude=4.5"
-    try:
-        res = requests.get(url, timeout=5).json()
-        features = res.get('features', [])
-        data = []
-        for f in features:
-            props = f['properties']
-            data.append({
-                "Магнитуда": props['mag'],
-                "Место": props['place'],
-                "Время": datetime.fromtimestamp(props['time'] / 1000).strftime('%d.%m %H:%M')
-            })
-        return pd.DataFrame(data)
-    except:
-        return pd.DataFrame()
-
-
-def get_kp():
-    try:
-        res = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
-        return float(res[-1][1])
-    except:
-        return 2.0
-
-
 # --- ИНТЕРФЕЙС ---
 data = load_vtec_data()
 
+# БОКОВАЯ ПАНЕЛЬ
+with st.sidebar:
+    st.header("🛰️ IonoSeis AI")
+    st.write(f"🕒 **Последний скан (UTC):** {data.get('timestamp', 'Нет данных')}")
+    st.info("Мониторинг литосферно-ионосферных связей.")
+
 st.title("🛰️ IonoSeis AI: Экспертный мониторинг")
-st.metric("Индекс солнечной активности (Kp)", f"{get_kp()} (Kp)")
 
 tabs = st.tabs(["🟢 МОНИТОРИНГ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 МЕТОДОЛОГИЯ"])
 
 with tabs[0]:
-    st.write(f"🕒 **Последний скан данных:** {data.get('timestamp', 'Нет данных')}")
     cols = st.columns(5)
-    for i, (city, (lat, lon)) in enumerate(CITIES.items()):
+    for i, (city, (lat, lon, tz)) in enumerate(CITIES.items()):
         val = data.get(city, 15.0)
         z = (val - 15.0) / 1.5
+        local_time = datetime.now(pytz.timezone(tz)).strftime('%H:%M')
         with cols[i]:
             st.metric(city, f"{val:.1f} TECU", f"Z: {z:+.1f}")
+            st.caption(f"🕒 {local_time} (местное)")
             color = [255, 0, 0, 160] if abs(z) > 2.0 else [60, 200, 60, 160]
             st.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=4),
                                      layers=[pdk.Layer("ScatterplotLayer", pd.DataFrame({'lat': [lat], 'lon': [lon]}),
@@ -85,24 +97,15 @@ with tabs[0]:
                                                        get_radius=60000)]))
 
 with tabs[1]:
-    st.subheader("Сейсмическая активность (4.5+ магнитуд за 3 дня)")
-    df_quakes = get_seismic_data()
-    if not df_quakes.empty:
-        def highlight_mag(row):
-            return ['background-color: #ffcccc' if row['Магнитуда'] >= 5.0 else '' for _ in row]
-
-
-        st.dataframe(df_quakes.style.apply(highlight_mag, axis=1), use_container_width=True)
+    st.subheader("Сейсмическая активность в целевых регионах (4.0+)")
+    df = get_filtered_seismic_data()
+    if not df.empty:
+        st.dataframe(
+            df.style.map(lambda x: 'background-color: #ffcccc' if isinstance(x, (int, float)) and x >= 5.0 else '',
+                         subset=['Магнитуда']), use_container_width=True)
     else:
-        st.write("Нет значимых событий.")
+        st.write("В радиусе 500км от целевых городов значимых событий не зафиксировано.")
 
 with tabs[2]:
-    st.markdown("""
-    ### 🧪 Методология: VTEC и литосферно-ионосферные связи (LIS)
-    Система базируется на концепции пресейсмической ионизации ионосферы.
-
-    1. **Физический процесс:** Перед землетрясениями в зоне разлома происходит накопление напряжений, что приводит к росту электронной плотности (VTEC) в ионосфере.
-    2. **Z-score:** Статистический параметр *Z = (VTEC_current - VTEC_mean) / σ*. 
-       - Значение **Z > 2.0** является сигналом аномалии.
-    """)
-    st.image("https://upload.wikimedia.org/wikipedia/commons/e/e0/Ionosphere_layers.png", caption="Структура ионосферы")
+    st.markdown("### 🧪 Научная методология")
+    st.write("Ионосферные аномалии рассматриваются как индикаторы перераспределения напряжений в земной коре.")
