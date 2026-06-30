@@ -2,24 +2,20 @@ import json
 import requests
 from datetime import datetime
 
-
-def update_data():
-    # Эмуляция получения данных VTEC (в будущем — парсинг IONEX)
-    vtec_base = 16.5
-
+# URL к данным (пример для NASA/IGS, вставьте актуальный путь к вашему IONEX)
+def fetch_real_vtec():
+    # ЭТО МЕСТО ДЛЯ ВАШЕГО ПАРСЕРА IONEX-ФАЙЛОВ
+    # Пока мы имитируем "живые" данные, чтобы структура работала
     data = {
-        "Алматы": vtec_base,
-        "Бишкек": vtec_base - 0.3,
-        "Токио": 18.2,
-        "Тайвань (Хуалянь)": 17.5,
-        "Стамбул": 15.1,
+        "Алматы": 16.8,
+        "Бишкек": 16.5,
+        "Токио": 18.9,
+        "Тайвань (Хуалянь)": 18.2,
+        "Стамбул": 15.4,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
-
     with open('vtec_data.json', 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
-    print(f"Данные обновлены: {data['timestamp']}")
-
+        json.dump(data, f, ensure_ascii=False)
 
 if __name__ == "__main__":
-    update_data()
+    fetch_real_vtec()

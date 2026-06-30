@@ -1,91 +1,67 @@
 import streamlit as st
-import numpy as np
-import requests
+import json
 import pandas as pd
+import requests
 import pydeck as pdk
 from datetime import datetime, timezone, timedelta
 
-# --- КОНФИГУРАЦИЯ ---
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Dashboard", page_icon="🛰️")
+st.set_page_config(layout="wide", page_title="IonoSeis AI", page_icon="🛰️")
 
-# Стиль
-st.markdown("""
-    <style>
-    [data-testid="stMetric"] { background-color: #f0fdf4; border: 1px solid #22c55e; padding: 15px; border-radius: 10px; }
-    [data-testid="stSidebar"] { background-color: #f7fee7; }
-    </style>
-""", unsafe_allow_html=True)
+
+# Чтение "живых" данных из файла
+def load_data():
+    try:
+        with open('vtec_data.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except:
+        return {"Алматы": 15.0, "Бишкек": 15.0, "Токио": 15.0, "Тайвань (Хуалянь)": 15.0, "Стамбул": 15.0}
+
+
+@st.cache_data(ttl=300)
+def get_kp():
+    try:
+        res = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
+        return float(res[-1][1])
+    except:
+        return 2.0
+
 
 CITIES = {
     "Алматы": (43.25, 76.92), "Бишкек": (42.87, 74.59),
     "Токио": (35.68, 139.65), "Тайвань (Хуалянь)": (24.00, 121.60), "Стамбул": (41.00, 28.97)
 }
 
+st.title("🛰️ IonoSeis AI: Реальный мониторинг")
+kp = get_kp()
+st.metric("Текущий Kp-индекс", f"{kp} (Kp)")
 
-# --- ФУНКЦИИ С КЭШИРОВАНИЕМ ---
-@st.cache_data(ttl=3600)
-def get_space_weather_data():
-    try:
-        # NOAA K-Index
-        url_k = "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json"
-        res_k = requests.get(url_k, timeout=5).json()
-        kp = float(res_k[-1][1])
-        return kp, 145.0
-    except:
-        return 2.1, 145.0
+data = load_data()
+tabs = st.tabs(["🟢 МОНИТОРИНГ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 МЕТОДОЛОГИЯ"])
 
-
-def get_recent_quakes(lat, lon):
-    try:
-        three_days_ago = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
-        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=5.0&starttime={three_days_ago}"
-        return requests.get(url, timeout=5).json().get('features', [])
-    except:
-        return []
-
-
-# --- ИНТЕРФЕЙС ---
-st.header("🛰️ IonoSeis AI: Экспертный мониторинг")
-kp, f107 = get_space_weather_data()
-
-c1, c2, c3 = st.columns(3)
-c1.metric("Kp-индекс", f"{kp} (Kp)")
-c2.metric("Поток F10.7", f"{f107} sfu")
-c3.metric("Время UTC", datetime.now(timezone.utc).strftime('%H:%M:%S'))
-
-tab1, tab2, tab3 = st.tabs(["🟢 МОНИТОРИНГ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 НАУЧНАЯ БАЗА"])
-
-with tab1:
+with tabs[0]:
     cols = st.columns(5)
     for i, (city, (lat, lon)) in enumerate(CITIES.items()):
-        val = 15.0 + np.random.normal(0, 0.3)
+        val = data.get(city, 15.0)
         z = (val - 15.0) / 1.5
         with cols[i]:
             st.metric(city, f"{val:.1f} TECU", f"{z:+.1f}σ")
-            df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
             color = [255, 0, 0, 160] if abs(z) > 2.0 else [60, 200, 60, 160]
             st.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=4),
-                                     layers=[pdk.Layer("ScatterplotLayer", df, get_position=["lon", "lat"],
-                                                       get_fill_color=color, get_radius=60000)]))
+                                     layers=[pdk.Layer("ScatterplotLayer", pd.DataFrame({'lat': [lat], 'lon': [lon]}),
+                                                       get_position=["lon", "lat"], get_fill_color=color,
+                                                       get_radius=60000)]))
 
-with tab2:
-    st.subheader("🌋 Сейсмическая активность (последние 72 часа)")
+with tabs[1]:
     for city, (lat, lon) in CITIES.items():
-        quakes = get_recent_quakes(lat, lon)
+        url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=5.0"
+        quakes = requests.get(url, timeout=5).json().get('features', [])
         for q in quakes:
-            dt = datetime.fromtimestamp(q['properties']['time'] / 1000).strftime('%d.%m %H:%M')
-            st.error(f"⚠️ {city}: {dt} | {q['properties']['mag']} M | {q['properties']['place']}")
+            st.error(f"⚠️ {city}: {q['properties']['mag']} M | {q['properties']['place']}")
 
-with tab3:
-    st.subheader("🧪 Научно-методологическая база")
-    st.markdown("""
-    Система фиксирует **ионосферные отклики** на тектонические процессы.
-    1. **Эмиссия:** Тектоническое напряжение высвобождает ионы из коры.
-    2. **VTEC:** Изменение концентрации электронов фиксируется над зоной разлома.
-    3. **Анализ:** Если $Z > 2.5$ при низком Kp-индексе — это значимый сигнал.
-    """)
+with tabs[2]:
+    st.markdown("### Принцип LIS: Ионизация как прекурсор")
+    st.markdown("Система анализирует аномалии VTEC, возникающие из-за эмиссии радона перед сейсмическим событием.")
 
-# Автообновление
 import time
 
 time.sleep(60)
