@@ -17,12 +17,20 @@ def load_vtec_data():
     except:
         return {"Алматы": 16.5, "Бишкек": 16.2, "Токио": 18.2, "Тайвань": 17.5, "Стамбул": 15.1}
 
-# Получение Kp-индекса
 def get_kp_index():
     try:
-        data = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=3).json()
-        return f"{data[-1][1]} (Kp)"
-    except:
+        # Используем альтернативный URL, если основной не отвечает
+        url = "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json"
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            # Берем последнее значение из списка (индекс Kp)
+            # Структура данных обычно [время, значение]
+            latest_kp = data[-1][1]
+            return f"{latest_kp} (Kp)"
+        else:
+            return "Ошибка связи"
+    except Exception as e:
         return "N/A"
 
 # Боковая панель
