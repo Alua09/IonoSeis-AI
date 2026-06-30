@@ -11,3 +11,5 @@ matplotlib
 gTTS
 pydeck
 scipy
+pyigc
+georinex
