@@ -4,13 +4,13 @@ import pandas as pd
 import requests
 import pydeck as pdk
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import pytz
 
 # --- КОНФИГУРАЦИЯ ---
-st.set_page_config(layout="wide", page_title="IonoSeis AI: Expert Dashboard", page_icon="🛰️")
+st.set_page_config(layout="wide", page_title="IonoSeis AI", page_icon="🛰️")
 
-# Настройки времени для городов
+# Настройки времени
 CITY_TZ = {
     "Алматы": "Asia/Almaty", "Бишкек": "Asia/Bishkek",
     "Токио": "Asia/Tokyo", "Тайвань (Хуалянь)": "Asia/Taipei", "Стамбул": "Europe/Istanbul"
@@ -22,8 +22,7 @@ CITIES_COORDS = {
 }
 
 
-# --- ФУНКЦИИ ---
-@st.cache_data(ttl=900)  # Обновление данных каждые 15 минут (900 сек)
+@st.cache_data(ttl=10800)  # Обновление кэша каждые 3 часа
 def load_vtec_data():
     try:
         with open('vtec_data.json', 'r', encoding='utf-8') as f:
@@ -43,42 +42,33 @@ def get_kp():
 # --- БОКОВАЯ ПАНЕЛЬ ---
 with st.sidebar:
     st.header("🛰️ IonoSeis AI")
-    almaty_tz = pytz.timezone("Asia/Almaty")
-    st.write(f"🕒 **Время в Алматы:** {datetime.now(almaty_tz).strftime('%H:%M:%S')}")
+    st.write(f"🕒 **Время в Алматы:** {datetime.now(pytz.timezone('Asia/Almaty')).strftime('%H:%M:%S')}")
     st.divider()
-    st.write("🌍 **Источники:** NASA CDDIS, USGS, NOAA")
-    if st.button("🔄 Обновить сейчас"): st.rerun()
+    st.write("🌍 **Источники:** NASA, USGS, NOAA")
 
 # --- ГЛАВНЫЙ ЭКРАН ---
 st.title("🛰️ IonoSeis AI: Экспертный мониторинг")
-st.metric("Текущий индекс солнечной активности (Kp)", f"{get_kp()} (Kp)")
+st.metric("Индекс солнечной активности (Kp)", f"{get_kp()} (Kp)")
 
 data = load_vtec_data()
-tab1, tab2, tab3 = st.tabs(["🟢 МОНИТОРИНГ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 МЕТОДОЛОГИЯ"])
+tabs = st.tabs(["🟢 МОНИТОРИНГ", "🌋 СЕЙСМО-ЛЕНТА", "🧪 МЕТОДОЛОГИЯ"])
 
-with tab1:
+with tabs[0]:
     cols = st.columns(5)
     for i, (city, (lat, lon)) in enumerate(CITIES_COORDS.items()):
         val = data.get(city, 15.0)
         z = (val - 15.0) / 1.5
-
-        # Локальное время города
-        tz = pytz.timezone(CITY_TZ.get(city, "UTC"))
-        local_time = datetime.now(tz).strftime('%H:%M')
-
+        local_time = datetime.now(pytz.timezone(CITY_TZ[city])).strftime('%H:%M')
         with cols[i]:
             st.metric(city, f"{val:.1f} TECU", f"Z: {z:+.1f}")
             st.caption(f"🕒 {local_time} (местное)")
-            color = [255, 0, 0, 160] if abs(z) > 2.0 else [60, 200, 60, 160]
             st.pydeck_chart(pdk.Deck(initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=4),
                                      layers=[pdk.Layer("ScatterplotLayer", pd.DataFrame({'lat': [lat], 'lon': [lon]}),
-                                                       get_position=["lon", "lat"], get_fill_color=color,
+                                                       get_position=["lon", "lat"], get_fill_color=[255, 0, 0, 160],
                                                        get_radius=60000)]))
 
-with tab2:
+with tabs[1]:
     st.subheader("🌋 Сейсмическая активность (последние 72 часа)")
-    from datetime import timezone, timedelta
-
     three_days_ago = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
     for city, (lat, lon) in CITIES_COORDS.items():
         url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude={lat}&longitude={lon}&maxradiuskm=500&minmagnitude=5.0&starttime={three_days_ago}"
@@ -88,12 +78,11 @@ with tab2:
                 ts = datetime.fromtimestamp(q['properties']['time'] / 1000).strftime('%d.%m %H:%M')
                 st.error(f"⚠️ {city}: {ts} | {q['properties']['mag']} M | {q['properties']['place']}")
         except:
-            continue
+            pass
 
-with tab3:
-    st.subheader("🧪 Научная концепция LIS")
-    st.markdown("Анализ ионосферных аномалий (VTEC) как индикаторов сейсмического напряжения.")
+with tabs[2]:
+    st.markdown("### Принцип LIS: Ионизация как прекурсор")
+    st.markdown("Система анализирует аномалии VTEC, возникающие из-за эмиссии радона перед сейсмическим событием.")
 
-# Автообновление раз в минуту
 time.sleep(60)
 st.rerun()
