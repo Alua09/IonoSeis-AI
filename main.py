@@ -24,7 +24,6 @@ CITIES = {
 
 # --- ФУНКЦИИ ---
 def haversine(lat1, lon1, lat2, lon2):
-    """Расстояние в км между двумя точками"""
     R = 6371
     dLat, dLon = radians(lat2 - lat1), radians(lon2 - lon1)
     a = sin(dLat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dLon / 2) ** 2
@@ -33,22 +32,17 @@ def haversine(lat1, lon1, lat2, lon2):
 
 @st.cache_data(ttl=300)
 def get_filtered_seismic_data():
-    """Землетрясения 4.0+ в радиусе 500км от наших городов"""
-    url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=4.0&limit=200"
+    url = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=4.0&limit=100"
     try:
         res = requests.get(url, timeout=10).json()
         data = []
         for f in res['features']:
             props = f['properties']
-            coords = f['geometry']['coordinates']  # [lon, lat]
-            quake_lat, quake_lon = coords[1], coords[0]
-
-            # Проверка дистанции до любого из городов
+            quake_lat, quake_lon = f['geometry']['coordinates'][1], f['geometry']['coordinates'][0]
             for city, (c_lat, c_lon, _) in CITIES.items():
                 if haversine(quake_lat, quake_lon, c_lat, c_lon) < 500:
                     data.append({
-                        "Магнитуда": props['mag'],
-                        "Ближайший город": city,
+                        "Магнитуда": props['mag'], "Город": city,
                         "Место": props['place'],
                         "Время": datetime.fromtimestamp(props['time'] / 1000).strftime('%d.%m %H:%M')
                     })
@@ -58,14 +52,12 @@ def get_filtered_seismic_data():
         return pd.DataFrame()
 
 
-def load_vtec_data():
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
+def get_kp():
+    try:
+        res = requests.get("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeout=5).json()
+        return float(res[-1][1])
+    except:
+        return 2.0
 
 
 # --- ИНТЕРФЕЙС ---
@@ -75,6 +67,12 @@ data = load_vtec_data()
 with st.sidebar:
     st.header("🛰️ IonoSeis AI")
     st.write(f"🕒 **Последний скан (UTC):** {data.get('timestamp', 'Нет данных')}")
+    st.metric("Индекс солнечной активности (Kp)", f"{get_kp()}")
+    st.divider()
+    st.caption("Источники данных:")
+    st.write("• NASA CDDIS (VTEC)")
+    st.write("• USGS API (Сейсмика)")
+    st.write("• NOAA (Kp-индекс)")
     st.info("Мониторинг литосферно-ионосферных связей.")
 
 st.title("🛰️ IonoSeis AI: Экспертный мониторинг")
@@ -97,15 +95,21 @@ with tabs[0]:
                                                        get_radius=60000)]))
 
 with tabs[1]:
-    st.subheader("Сейсмическая активность в целевых регионах (4.0+)")
+    st.subheader("🌋 Сейсмическая активность (4.0+ магнитуд, <500км от городов)")
     df = get_filtered_seismic_data()
     if not df.empty:
         st.dataframe(
             df.style.map(lambda x: 'background-color: #ffcccc' if isinstance(x, (int, float)) and x >= 5.0 else '',
                          subset=['Магнитуда']), use_container_width=True)
     else:
-        st.write("В радиусе 500км от целевых городов значимых событий не зафиксировано.")
+        st.write("В радиусе мониторинга значимых событий нет.")
 
 with tabs[2]:
-    st.markdown("### 🧪 Научная методология")
-    st.write("Ионосферные аномалии рассматриваются как индикаторы перераспределения напряжений в земной коре.")
+    st.markdown("""
+    ### 🧪 Научная методология: Литосферно-ионосферные связи (LIS)
+    Данная система предназначена для обнаружения краткосрочных ионосферных предвестников сейсмических событий.
+
+    * **Принцип:** Тектонические напряжения в очаге будущего землетрясения генерируют аномальные электрические поля, которые, проникая в ионосферу, локально меняют концентрацию заряженных частиц (VTEC).
+    * **Параметр Z-score:** Стандартизированное отклонение текущего VTEC от фонового уровня. Значения **Z > +2.0** указывают на статистически аномальное возбуждение ионосферы.
+    * **Важно:** Мониторинг Kp-индекса (солнечной активности) позволяет исключить "ложные" срабатывания, вызванные солнечными бурями, а не литосферными процессами.
+    """)
