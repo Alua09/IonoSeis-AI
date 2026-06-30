@@ -1,4 +1,6 @@
 .venv/
+.env/
 __pycache__/
-vtec_data.json
+*.pyc
 .DS_Store
+vtec_data.json
